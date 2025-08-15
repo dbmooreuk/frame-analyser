@@ -1,0 +1,30 @@
+{
+  "name": "Frame Analyzer",
+  "id": "frame-analyzer",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "editorType": [
+    "figma"
+  ],
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  },
+  "permissions": [
+    "currentuser"
+  ],
+  "relaunchButtons": [
+    {
+      "command": "analyze",
+      "name": "Analyze Frame"
+    }
+  ],
+  "menu": [
+    {
+      "name": "Analyze Selected Frame",
+      "command": "analyze"
+    }
+  ]
+}

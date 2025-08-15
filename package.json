@@ -1,0 +1,32 @@
+{
+  "name": "frame-analyser",
+  "version": "1.0.0",
+  "description": "A comprehensive Figma plugin for analyzing HMI screen designs and extracting component, typography, and color information",
+  "main": "code.js",
+  "scripts": {
+    "build": "echo 'No build process required for this plugin'",
+    "dev": "echo 'Plugin ready for development. Import manifest.json in Figma Desktop.'",
+    "test": "echo 'See TESTING.md for manual testing procedures'"
+  },
+  "keywords": [
+    "figma",
+    "figma-plugin",
+    "design-analysis",
+    "hmi",
+    "human-machine-interface",
+    "components",
+    "typography",
+    "colors",
+    "design-system"
+  ],
+  "author": "Frame Analyser Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/frame-analyser.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/frame-analyser/issues"
+  },
+  "homepage": "https://github.com/yourusername/frame-analyser#readme"
+}
