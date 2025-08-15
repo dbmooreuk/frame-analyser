@@ -425,11 +425,10 @@ async function createAnalysisFrame(originalFrame, analysisData) {
       analysisFrame = figma.createFrame();
       analysisFrame.name = `Analysis: ${analysisData.frameInfo.name}`;
 
-      // Position the frame safely
-      const safeX = Math.max(0, originalFrame.x + originalFrame.width + 100);
-      const safeY = Math.max(0, originalFrame.y);
-      analysisFrame.x = safeX;
-      analysisFrame.y = safeY;
+      // Find the best position for the new analysis frame
+      const position = findBestAnalysisPosition(originalFrame);
+      analysisFrame.x = position.x;
+      analysisFrame.y = position.y;
 
       figma.ui.postMessage({
         type: 'progress',
@@ -437,19 +436,19 @@ async function createAnalysisFrame(originalFrame, analysisData) {
       });
     }
 
-    analysisFrame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
-    analysisFrame.cornerRadius = 8;
+    analysisFrame.fills = [{ type: 'SOLID', color: { r: 0.95, g: 0.95, b: 0.95 } }];
+    analysisFrame.cornerRadius = 12;
     analysisFrame.effects = [{
       type: 'DROP_SHADOW',
       color: { r: 0, g: 0, b: 0, a: 0.1 },
-      offset: { x: 0, y: 2 },
-      radius: 8,
+      offset: { x: 0, y: 4 },
+      radius: 12,
       visible: true,
       blendMode: 'NORMAL'
     }];
 
-  let currentY = 24;
-  const padding = 24;
+  let currentY = 50;
+  const padding = 50;
   const sectionSpacing = 32;
 
     // Add title
@@ -503,16 +502,26 @@ async function createAnalysisFrame(originalFrame, analysisData) {
   // Add summary section
   currentY = await addSummarySection(analysisFrame, analysisData, currentY, padding);
 
-    // Set frame size with minimum dimensions
+    // Calculate required width by checking all child elements
+    let maxWidth = 0;
+    for (const child of analysisFrame.children) {
+      const childRight = child.x + child.width;
+      maxWidth = Math.max(maxWidth, childRight);
+    }
+
+    // Set frame size with minimum dimensions and content-based width
     const minWidth = 450;
     const minHeight = 200;
-    const finalWidth = Math.max(minWidth, 450);
+    const contentWidth = maxWidth + (padding * 2); // Add extra padding to the right
+    const finalWidth = Math.max(minWidth, contentWidth);
     const finalHeight = Math.max(minHeight, currentY + padding);
 
     analysisFrame.resize(finalWidth, finalHeight);
 
-    // Add to current page
-    figma.currentPage.appendChild(analysisFrame);
+    // Add to current page if it's a new frame
+    if (!wasUpdated) {
+      figma.currentPage.appendChild(analysisFrame);
+    }
 
     // Select the analysis frame
     figma.currentPage.selection = [analysisFrame];
@@ -530,20 +539,47 @@ async function createAnalysisFrame(originalFrame, analysisData) {
 function findExistingAnalysisFrame(originalFrame) {
   const expectedAnalysisName = `Analysis: ${originalFrame.name}`;
 
-  // Search through all frames on the current page
+  // Search through all frames on the current page, including nested frames
   const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
 
   for (const frame of allFrames) {
     if (frame.name === expectedAnalysisName) {
-      // More lenient position check - just needs to be to the right of the original frame
-      const isPositionedCorrectly = frame.x >= originalFrame.x + originalFrame.width;
-
-      if (isPositionedCorrectly) {
-        return frame;
-      }
+      // Found a matching analysis frame - return it regardless of position
+      // This ensures we always replace existing analyses for the same frame
+      return frame;
     }
   }
+
   return null;
+}
+
+// Find the best position for a new analysis frame
+function findBestAnalysisPosition(originalFrame) {
+  // Get all existing analysis frames
+  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
+  const analysisFrames = allFrames.filter(frame => frame.name.startsWith('Analysis: '));
+
+  if (analysisFrames.length === 0) {
+    // First analysis frame - position to the right of the original frame
+    return {
+      x: Math.max(0, originalFrame.x + originalFrame.width + 100),
+      y: Math.max(0, originalFrame.y)
+    };
+  }
+
+  // Find the rightmost analysis frame
+  let rightmostFrame = analysisFrames[0];
+  for (const frame of analysisFrames) {
+    if (frame.x + frame.width > rightmostFrame.x + rightmostFrame.width) {
+      rightmostFrame = frame;
+    }
+  }
+
+  // Position the new analysis frame to the right of the rightmost one
+  return {
+    x: rightmostFrame.x + rightmostFrame.width + 50, // 50px gap between analysis frames
+    y: rightmostFrame.y // Same Y position as the rightmost frame
+  };
 }
 
 // Add a visual reference of the analyzed frame
@@ -1009,7 +1045,4 @@ function hexToRgb(hex) {
   } : { r: 0, g: 0, b: 0 };
 }
 
-// Initialize plugin
-if (figma.command === 'analyze') {
-  analyzeSelectedFrame();
-}
+// Plugin is ready - waiting for user interaction
