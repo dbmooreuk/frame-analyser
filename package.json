@@ -23,10 +23,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/frame-analyser.git"
+    "url": "git+https://github.com/dbmooreuk/frame-analyser.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/frame-analyser/issues"
+    "url": "https://github.com/dbmooreuk/frame-analyser/issues"
   },
-  "homepage": "https://github.com/yourusername/frame-analyser#readme"
+  "homepage": "https://github.com/dbmooreuk/frame-analyser#readme"
 }

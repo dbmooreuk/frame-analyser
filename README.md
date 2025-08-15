@@ -4,7 +4,7 @@
 
 [![Figma Plugin](https://img.shields.io/badge/Figma-Plugin-orange?style=flat-square&logo=figma)](https://figma.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=flat-square)](https://github.com/yourusername/frame-analyser)
+[![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=flat-square)](https://github.com/dbmooreuk/frame-analyser)
 
 Frame Analyser is a powerful Figma plugin specifically designed for analyzing HMI (Human Machine Interface) screen designs. It extracts detailed information about components, fonts, and colors, then creates a beautifully formatted analysis frame with visual references and organized data.
 
@@ -43,7 +43,7 @@ Frame Analyser is a powerful Figma plugin specifically designed for analyzing HM
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/yourusername/frame-analyser.git
+   git clone https://github.com/dbmooreuk/frame-analyser.git
    cd frame-analyser
    ```
 
@@ -179,7 +179,7 @@ We welcome contributions to Frame Analyser! Here's how you can help:
 
 1. **Fork the Repository**
    ```bash
-   git fork https://github.com/yourusername/frame-analyser.git
+   git fork https://github.com/dbmooreuk/frame-analyser.git
    cd frame-analyser
    ```
 
@@ -235,8 +235,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - **Documentation**: Check `INSTALLATION.md` and `TESTING.md`
-- **Issues**: [GitHub Issues](https://github.com/yourusername/frame-analyser/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/frame-analyser/discussions)
+- **Issues**: [GitHub Issues](https://github.com/dbmooreuk/frame-analyser/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/dbmooreuk/frame-analyser/discussions)
 
 ---
 

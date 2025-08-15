@@ -33,7 +33,7 @@ Feature requests are welcome! Please:
 
 1. **Fork and Clone**
    ```bash
-   git fork https://github.com/yourusername/frame-analyser.git
+   git fork https://github.com/dbmooreuk/frame-analyser.git
    cd frame-analyser
    ```
 
@@ -171,8 +171,8 @@ Frame Analyser is specifically designed for HMI (Human Machine Interface) analys
 
 ## 📞 Getting Help
 
-- **Questions**: Use [GitHub Discussions](https://github.com/yourusername/frame-analyser/discussions)
-- **Issues**: Create a [GitHub Issue](https://github.com/yourusername/frame-analyser/issues)
+- **Questions**: Use [GitHub Discussions](https://github.com/dbmooreuk/frame-analyser/discussions)
+- **Issues**: Create a [GitHub Issue](https://github.com/dbmooreuk/frame-analyser/issues)
 - **Documentation**: Check existing docs in the repository
 
 ## 🙏 Recognition
