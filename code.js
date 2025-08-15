@@ -451,24 +451,24 @@ async function createAnalysisFrame(originalFrame, analysisData) {
   const padding = 50;
   const sectionSpacing = 32;
 
-    // Add title
-    const title = figma.createText();
-    const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
-    title.fontName = titleFont;
-    title.fontSize = 20;
-    title.characters = `Frame Analysis`;
-    title.fills = [{ type: 'SOLID', color: { r: 0.1, g: 0.1, b: 0.1 } }];
-    title.x = padding;
-    title.y = currentY;
-    analysisFrame.appendChild(title);
-    currentY += title.height + 8;
+    // Add frame name as the first item (32px Bold #000000)
+    const frameName = figma.createText();
+    const frameNameFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+    frameName.fontName = frameNameFont;
+    frameName.fontSize = 32;
+    frameName.characters = analysisData.frameInfo.name;
+    frameName.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }]; // #000000
+    frameName.x = padding;
+    frameName.y = currentY;
+    analysisFrame.appendChild(frameName);
+    currentY += frameName.height + 16;
 
-    // Add frame info subtitle
+    // Add element count subtitle
     const subtitle = figma.createText();
     const subtitleFont = await loadFontSafely({ family: "Inter", style: "Regular" });
     subtitle.fontName = subtitleFont;
     subtitle.fontSize = 14;
-    subtitle.characters = `${analysisData.frameInfo.name} (${analysisData.frameInfo.elementCount} elements)`;
+    subtitle.characters = `${analysisData.frameInfo.elementCount} elements`;
     subtitle.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
     subtitle.x = padding;
     subtitle.y = currentY;
@@ -510,7 +510,8 @@ async function createAnalysisFrame(originalFrame, analysisData) {
     }
 
     // Set frame size with minimum dimensions and content-based width
-    const minWidth = 450;
+    // Minimum width needs to accommodate the 968px frame reference plus padding
+    const minWidth = 968 + (padding * 2); // 968px + 100px padding = 1068px minimum
     const minHeight = 200;
     const contentWidth = maxWidth + (padding * 2); // Add extra padding to the right
     const finalWidth = Math.max(minWidth, contentWidth);
@@ -600,15 +601,10 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
   // Clone the original frame
   const frameClone = originalFrame.clone();
 
-  // Calculate scale to fit within analysis frame width (max 350px wide)
-  const maxWidth = 350;
-  const maxHeight = 200;
-  const scaleX = maxWidth / originalFrame.width;
-  const scaleY = maxHeight / originalFrame.height;
-  const scale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
-
-  // Resize the clone
-  frameClone.resize(originalFrame.width * scale, originalFrame.height * scale);
+  // Set the clone to the specified size (968 x 649)
+  const targetWidth = 968;
+  const targetHeight = 649;
+  frameClone.resize(targetWidth, targetHeight);
 
   // Position the clone
   frameClone.x = padding;
@@ -622,22 +618,18 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
   // Add the clone to the analysis frame
   analysisFrame.appendChild(frameClone);
 
-  // Add a scale indicator if the frame was scaled down
-  if (scale < 1) {
-    const scaleLabel = figma.createText();
-    const scaleLabelFont = await loadFontSafely({ family: "Inter", style: "Regular" });
-    scaleLabel.fontName = scaleLabelFont;
-    scaleLabel.fontSize = 10;
-    scaleLabel.characters = `Scaled to ${Math.round(scale * 100)}%`;
-    scaleLabel.fills = [{ type: 'SOLID', color: { r: 0.6, g: 0.6, b: 0.6 } }];
-    scaleLabel.x = padding;
-    scaleLabel.y = currentY + frameClone.height + 4;
-    analysisFrame.appendChild(scaleLabel);
+  // Add a size indicator
+  const sizeLabel = figma.createText();
+  const sizeLabelFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+  sizeLabel.fontName = sizeLabelFont;
+  sizeLabel.fontSize = 10;
+  sizeLabel.characters = `Displayed at ${targetWidth} x ${targetHeight}px`;
+  sizeLabel.fills = [{ type: 'SOLID', color: { r: 0.6, g: 0.6, b: 0.6 } }];
+  sizeLabel.x = padding;
+  sizeLabel.y = currentY + frameClone.height + 4;
+  analysisFrame.appendChild(sizeLabel);
 
-    return currentY + frameClone.height + scaleLabel.height + 8;
-  }
-
-  return currentY + frameClone.height + 8;
+  return currentY + frameClone.height + sizeLabel.height + 8;
 }
 
 // Add a component section with instance counts
