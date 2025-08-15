@@ -142,161 +142,17 @@ async function analyzeFrame(frame) {
     message: `Analyzing ${allNodes.length} elements...`
   });
 
+  // First, analyze the selected frame itself
+  await analyzeNode(frame, components, fonts, colors, colorStyles, textStyles, effectStyles);
+
+  // Then analyze all child nodes within the frame
   for (let i = 0; i < allNodes.length; i++) {
     const node = allNodes[i];
 
     try {
-      // Extract components
-      if (node.type === 'INSTANCE') {
-        try {
-          const mainComponent = await node.getMainComponentAsync();
-          if (mainComponent) {
-            // Get the master component (parent of variants)
-            const masterComponent = mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET'
-              ? mainComponent.parent
-              : mainComponent;
-
-            // Create a unique key for this specific variant
-            const variantKey = mainComponent.key || mainComponent.id;
-
-            if (!components.has(variantKey)) {
-              // Determine if this is a variant or standalone component
-              const isVariant = mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET';
-
-              components.set(variantKey, {
-                masterName: isVariant ? masterComponent.name : mainComponent.name,
-                variantName: isVariant ? mainComponent.name : null,
-                fullName: mainComponent.name,
-                key: mainComponent.key,
-                id: mainComponent.id,
-                isVariant: isVariant,
-                instanceCount: 1
-              });
-            } else {
-              components.get(variantKey).instanceCount++;
-            }
-          }
-        } catch (error) {
-          console.warn('Could not access main component:', error);
-        }
-      }
-
-      // Extract fonts and text styles
-      if ('fontName' in node && node.fontName) {
-        try {
-          if (typeof node.fontName === 'object' && 'family' in node.fontName) {
-            const fontString = `${node.fontName.family} - ${node.fontName.style}`;
-
-            // Check for text styles and associate with font
-            let styleName = null;
-            if (node.textStyleId) {
-              try {
-                const style = await figma.getStyleByIdAsync(node.textStyleId);
-                if (style) {
-                  styleName = style.name;
-                  // Store text style with its font information
-                  textStyles.set(style.name, {
-                    fontFamily: node.fontName.family,
-                    fontStyle: node.fontName.style,
-                    fontSize: node.fontSize || 'Unknown'
-                  });
-                }
-              } catch (error) {
-                console.warn('Could not access text style:', error);
-              }
-            }
-
-            // Store font with its associated style (if any)
-            if (!fonts.has(fontString)) {
-              fonts.set(fontString, { styleName: styleName });
-            } else if (styleName && !fonts.get(fontString).styleName) {
-              // Update with style name if we didn't have one before
-              fonts.get(fontString).styleName = styleName;
-            }
-          }
-        } catch (error) {
-          console.warn('Error processing font:', error);
-        }
-      }
-
-      // Extract colors and color styles from fills
-      if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-        for (const fill of node.fills) {
-          if (fill.type === 'SOLID' && fill.color && fill.visible !== false) {
-            const color = fill.color;
-            const hex = rgbToHex(color.r, color.g, color.b);
-
-            // Check for fill styles and associate with color
-            let styleName = null;
-            if (node.fillStyleId) {
-              try {
-                const style = await figma.getStyleByIdAsync(node.fillStyleId);
-                if (style) {
-                  styleName = style.name;
-                  colorStyles.add(style.name);
-                }
-              } catch (error) {
-                console.warn('Could not access fill style:', error);
-              }
-            }
-
-            // Store color with its associated style (if any)
-            if (!colors.has(hex)) {
-              colors.set(hex, { styleName: styleName, type: 'fill' });
-            } else if (styleName && !colors.get(hex).styleName) {
-              // Update with style name if we didn't have one before
-              colors.get(hex).styleName = styleName;
-            }
-          }
-        }
-      }
-
-      // Extract stroke colors and styles
-      if ('strokes' in node && node.strokes && Array.isArray(node.strokes)) {
-        for (const stroke of node.strokes) {
-          if (stroke.type === 'SOLID' && stroke.color && stroke.visible !== false) {
-            const color = stroke.color;
-            const hex = rgbToHex(color.r, color.g, color.b);
-
-            // Check for stroke styles and associate with color
-            let styleName = null;
-            if (node.strokeStyleId) {
-              try {
-                const style = await figma.getStyleByIdAsync(node.strokeStyleId);
-                if (style) {
-                  styleName = style.name;
-                  colorStyles.add(style.name);
-                }
-              } catch (error) {
-                console.warn('Could not access stroke style:', error);
-              }
-            }
-
-            // Store color with its associated style (if any)
-            if (!colors.has(hex)) {
-              colors.set(hex, { styleName: styleName, type: 'stroke' });
-            } else if (styleName && !colors.get(hex).styleName) {
-              // Update with style name if we didn't have one before
-              colors.get(hex).styleName = styleName;
-            }
-          }
-        }
-      }
-
-      // Extract effect styles
-      if (node.effectStyleId) {
-        try {
-          const style = await figma.getStyleByIdAsync(node.effectStyleId);
-          if (style) {
-            effectStyles.add(style.name);
-          }
-        } catch (error) {
-          console.warn('Could not access effect style:', error);
-        }
-      }
-
+      await analyzeNode(node, components, fonts, colors, colorStyles, textStyles, effectStyles);
     } catch (error) {
-      console.warn(`Error processing node ${node.name}:`, error);
+      // Silently handle node processing errors
     }
 
     // Update progress periodically
@@ -329,6 +185,8 @@ async function analyzeFrame(frame) {
     fontSize: fontInfo.fontSize
   })).sort((a, b) => a.styleName.localeCompare(b.styleName));
 
+  // console.log(`Analysis complete: Found ${colorArray.length} colors, ${textStyleArray.length} text styles, ${Array.from(components.values()).length} components`);
+
   return {
     components: Array.from(components.values()),
     fonts: fontArray,
@@ -343,6 +201,164 @@ async function analyzeFrame(frame) {
       elementCount: allNodes.length
     }
   };
+}
+
+// Analyze a single node for components, fonts, colors, and styles
+async function analyzeNode(node, components, fonts, colors, colorStyles, textStyles, effectStyles) {
+  try {
+    // Extract components
+    if (node.type === 'INSTANCE') {
+      try {
+        const mainComponent = await node.getMainComponentAsync();
+        if (mainComponent) {
+          // Get the master component (parent of variants)
+          const masterComponent = mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET'
+            ? mainComponent.parent
+            : mainComponent;
+
+          // Create a unique key for this specific variant
+          const variantKey = mainComponent.key || mainComponent.id;
+
+          if (!components.has(variantKey)) {
+            // Determine if this is a variant or standalone component
+            const isVariant = mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET';
+
+            components.set(variantKey, {
+              masterName: isVariant ? masterComponent.name : mainComponent.name,
+              variantName: isVariant ? mainComponent.name : null,
+              fullName: mainComponent.name,
+              key: mainComponent.key,
+              id: mainComponent.id,
+              isVariant: isVariant,
+              instanceCount: 1
+            });
+          } else {
+            components.get(variantKey).instanceCount++;
+          }
+        }
+      } catch (error) {
+        // Silently handle inaccessible components
+      }
+    }
+
+    // Extract fonts and text styles
+    if ('fontName' in node && node.fontName) {
+      try {
+        if (typeof node.fontName === 'object' && 'family' in node.fontName) {
+          const fontString = `${node.fontName.family} - ${node.fontName.style}`;
+
+          // Check for text styles and associate with font
+          let styleName = null;
+          if (node.textStyleId) {
+            try {
+              const style = await figma.getStyleByIdAsync(node.textStyleId);
+              if (style) {
+                styleName = style.name;
+                // Store text style with its font information
+                textStyles.set(style.name, {
+                  fontFamily: node.fontName.family,
+                  fontStyle: node.fontName.style,
+                  fontSize: node.fontSize || 'Unknown'
+                });
+              }
+            } catch (error) {
+              // Silently handle inaccessible text styles
+            }
+          }
+
+          // Store font with its associated style (if any)
+          if (!fonts.has(fontString)) {
+            fonts.set(fontString, { styleName: styleName });
+          } else if (styleName && !fonts.get(fontString).styleName) {
+            // Update with style name if we didn't have one before
+            fonts.get(fontString).styleName = styleName;
+          }
+        }
+      } catch (error) {
+        // Silently handle font processing errors
+      }
+    }
+
+    // Extract colors and color styles from fills
+    if ('fills' in node && node.fills && Array.isArray(node.fills)) {
+      for (const fill of node.fills) {
+        // Check for solid fills that are visible
+        if (fill.type === 'SOLID' && fill.color && fill.visible !== false && fill.opacity !== 0) {
+          const color = fill.color;
+          const hex = rgbToHex(color.r, color.g, color.b);
+
+          // Check for fill styles and associate with color
+          let styleName = null;
+          if (node.fillStyleId) {
+            try {
+              const style = await figma.getStyleByIdAsync(node.fillStyleId);
+              if (style) {
+                styleName = style.name;
+                colorStyles.add(style.name);
+              }
+            } catch (error) {
+              // Silently handle inaccessible fill styles
+            }
+          }
+
+          // Store color with its associated style (if any)
+          if (!colors.has(hex)) {
+            colors.set(hex, { styleName: styleName, type: 'fill' });
+          } else if (styleName && !colors.get(hex).styleName) {
+            // Update with style name if we didn't have one before
+            colors.get(hex).styleName = styleName;
+          }
+        }
+      }
+    }
+
+    // Extract stroke colors and styles
+    if ('strokes' in node && node.strokes && Array.isArray(node.strokes)) {
+      for (const stroke of node.strokes) {
+        if (stroke.type === 'SOLID' && stroke.color && stroke.visible !== false && stroke.opacity !== 0) {
+          const color = stroke.color;
+          const hex = rgbToHex(color.r, color.g, color.b);
+
+          // Check for stroke styles and associate with color
+          let styleName = null;
+          if (node.strokeStyleId) {
+            try {
+              const style = await figma.getStyleByIdAsync(node.strokeStyleId);
+              if (style) {
+                styleName = style.name;
+                colorStyles.add(style.name);
+              }
+            } catch (error) {
+              // Silently handle inaccessible stroke styles
+            }
+          }
+
+          // Store color with its associated style (if any)
+          if (!colors.has(hex)) {
+            colors.set(hex, { styleName: styleName, type: 'stroke' });
+          } else if (styleName && !colors.get(hex).styleName) {
+            // Update with style name if we didn't have one before
+            colors.get(hex).styleName = styleName;
+          }
+        }
+      }
+    }
+
+    // Extract effect styles
+    if (node.effectStyleId) {
+      try {
+        const style = await figma.getStyleByIdAsync(node.effectStyleId);
+        if (style) {
+          effectStyles.add(style.name);
+        }
+      } catch (error) {
+        // Silently handle inaccessible effect styles
+      }
+    }
+
+  } catch (error) {
+    // Silently handle node processing errors
+  }
 }
 
 // Convert RGB to Hex
@@ -360,7 +376,7 @@ async function loadFontSafely(fontName) {
     await figma.loadFontAsync(fontName);
     return fontName;
   } catch (error) {
-    console.warn(`Could not load font ${fontName.family} ${fontName.style}, trying fallbacks...`);
+    // Try fallbacks silently
 
     // Try common fallbacks
     const fallbacks = [
@@ -519,16 +535,14 @@ function findExistingAnalysisFrame(originalFrame) {
 
   for (const frame of allFrames) {
     if (frame.name === expectedAnalysisName) {
-      // Additional check: verify this frame is positioned like an analysis frame
-      // (to the right of the original frame)
-      const isPositionedCorrectly = frame.x > originalFrame.x + originalFrame.width - 50;
+      // More lenient position check - just needs to be to the right of the original frame
+      const isPositionedCorrectly = frame.x >= originalFrame.x + originalFrame.width;
 
       if (isPositionedCorrectly) {
         return frame;
       }
     }
   }
-
   return null;
 }
 
