@@ -65,12 +65,13 @@ async function analyzeSelectedFrame() {
       message: 'Creating analysis frame...'
     });
 
-    // Create the analysis frame
-    await createAnalysisFrame(selectedNode, analysisData);
+    // Create or update the analysis frame
+    const wasUpdated = await createAnalysisFrame(selectedNode, analysisData);
+    const actionText = wasUpdated ? 'updated' : 'completed';
 
     figma.ui.postMessage({
       type: 'success',
-      message: `Analysis completed! Found ${analysisData.components.length} components, ${analysisData.fonts.length} fonts, and ${analysisData.colors.length} colors.`
+      message: `Analysis ${actionText}! Found ${analysisData.components.length} components, ${analysisData.fonts.length} fonts, and ${analysisData.colors.length} colors.`
     });
 
   } catch (error) {
@@ -386,14 +387,39 @@ async function loadFontSafely(fontName) {
 // Create the analysis frame with extracted information
 async function createAnalysisFrame(originalFrame, analysisData) {
   try {
-    const analysisFrame = figma.createFrame();
-    analysisFrame.name = `Analysis: ${analysisData.frameInfo.name}`;
+    // Check if an analysis frame already exists for this original frame
+    const existingAnalysisFrame = findExistingAnalysisFrame(originalFrame);
 
-    // Position the frame safely
-    const safeX = Math.max(0, originalFrame.x + originalFrame.width + 100);
-    const safeY = Math.max(0, originalFrame.y);
-    analysisFrame.x = safeX;
-    analysisFrame.y = safeY;
+    let analysisFrame;
+    let wasUpdated = false;
+
+    if (existingAnalysisFrame) {
+      // Replace existing analysis frame
+      analysisFrame = existingAnalysisFrame;
+      // Clear existing content
+      analysisFrame.children.forEach(child => child.remove());
+      wasUpdated = true;
+
+      figma.ui.postMessage({
+        type: 'progress',
+        message: 'Updating existing analysis...'
+      });
+    } else {
+      // Create new analysis frame
+      analysisFrame = figma.createFrame();
+      analysisFrame.name = `Analysis: ${analysisData.frameInfo.name}`;
+
+      // Position the frame safely
+      const safeX = Math.max(0, originalFrame.x + originalFrame.width + 100);
+      const safeY = Math.max(0, originalFrame.y);
+      analysisFrame.x = safeX;
+      analysisFrame.y = safeY;
+
+      figma.ui.postMessage({
+        type: 'progress',
+        message: 'Creating new analysis...'
+      });
+    }
 
     analysisFrame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
     analysisFrame.cornerRadius = 8;
@@ -472,14 +498,38 @@ async function createAnalysisFrame(originalFrame, analysisData) {
     // Add to current page
     figma.currentPage.appendChild(analysisFrame);
 
-    // Select the new analysis frame
+    // Select the analysis frame
     figma.currentPage.selection = [analysisFrame];
     figma.viewport.scrollAndZoomIntoView([analysisFrame]);
+
+    return wasUpdated;
 
   } catch (error) {
     console.error('Error creating analysis frame:', error);
     throw new Error(`Failed to create analysis frame: ${error.message}`);
   }
+}
+
+// Find existing analysis frame for the given original frame
+function findExistingAnalysisFrame(originalFrame) {
+  const expectedAnalysisName = `Analysis: ${originalFrame.name}`;
+
+  // Search through all frames on the current page
+  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
+
+  for (const frame of allFrames) {
+    if (frame.name === expectedAnalysisName) {
+      // Additional check: verify this frame is positioned like an analysis frame
+      // (to the right of the original frame)
+      const isPositionedCorrectly = frame.x > originalFrame.x + originalFrame.width - 50;
+
+      if (isPositionedCorrectly) {
+        return frame;
+      }
+    }
+  }
+
+  return null;
 }
 
 // Add a visual reference of the analyzed frame
