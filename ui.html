@@ -169,6 +169,29 @@
       width: 0%;
     }
 
+    .progress-details {
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: #f8f9fa;
+      border: 1px solid #e1e5e9;
+      border-radius: 6px;
+      font-size: 10px;
+      color: #666666;
+      display: none;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .progress-item {
+      margin-bottom: 2px;
+      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    }
+
+    .progress-item.current {
+      color: #2563eb;
+      font-weight: 500;
+    }
+
     .tips {
       background: #fffbeb;
       border: 1px solid #fde68a;
@@ -249,6 +272,8 @@
     <div class="progress-bar-fill" id="progress-fill"></div>
   </div>
 
+  <div class="progress-details" id="progress-details"></div>
+
   <div class="status" id="status"></div>
 
   <div class="version">Frame Analyzer v1.0 - HMI Design Analysis Tool</div>
@@ -260,6 +285,7 @@
     const status = document.getElementById('status');
     const progressBar = document.getElementById('progress-bar');
     const progressFill = document.getElementById('progress-fill');
+    const progressDetails = document.getElementById('progress-details');
     
     // Handle analyze button click
     analyzeBtn.addEventListener('click', () => {
@@ -296,6 +322,9 @@
       } else if (msg.type === 'progress') {
         analyzeBtn.textContent = msg.message;
         updateProgress();
+        if (msg.details) {
+          addProgressDetail(msg.details);
+        }
       } else if (msg.type === 'warning') {
         showStatus(msg.message, 'warning');
       }
@@ -322,13 +351,18 @@
     // Show progress bar
     function showProgress() {
       progressBar.style.display = 'block';
+      progressDetails.style.display = 'block';
       progressFill.style.width = '0%';
+      progressDetails.innerHTML = '';
+      progressValue = 0;
     }
 
     // Hide progress bar
     function hideProgress() {
       progressBar.style.display = 'none';
+      progressDetails.style.display = 'none';
       progressFill.style.width = '0%';
+      progressDetails.innerHTML = '';
     }
 
     // Update progress bar (simple animation)
@@ -336,6 +370,30 @@
     function updateProgress() {
       progressValue = Math.min(progressValue + 15, 90);
       progressFill.style.width = progressValue + '%';
+    }
+
+    // Add detailed progress information
+    function addProgressDetail(detail) {
+      const item = document.createElement('div');
+      item.className = 'progress-item current';
+      item.textContent = detail;
+
+      // Remove 'current' class from previous items
+      const previousItems = progressDetails.querySelectorAll('.progress-item.current');
+      previousItems.forEach(prevItem => {
+        prevItem.classList.remove('current');
+      });
+
+      progressDetails.appendChild(item);
+
+      // Auto-scroll to bottom
+      progressDetails.scrollTop = progressDetails.scrollHeight;
+
+      // Keep only last 10 items to prevent overflow
+      const items = progressDetails.querySelectorAll('.progress-item');
+      if (items.length > 10) {
+        items[0].remove();
+      }
     }
   </script>
 </body>

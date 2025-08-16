@@ -62,12 +62,19 @@ async function analyzeSelectedFrame() {
 
     figma.ui.postMessage({
       type: 'progress',
-      message: 'Creating analysis frame...'
+      message: 'Creating analysis frame...',
+      details: `Starting analysis of frame: ${selectedNode.name}`
     });
+
+    // Store analysis data for summary
+    storeAnalysisData(selectedNode.name, analysisData);
 
     // Create or update the analysis frame
     const wasUpdated = await createAnalysisFrame(selectedNode, analysisData);
     const actionText = wasUpdated ? 'updated' : 'completed';
+
+    // Create or update the summary analysis
+    await createOrUpdateSummaryAnalysis();
 
     figma.ui.postMessage({
       type: 'success',
@@ -139,7 +146,8 @@ async function analyzeFrame(frame) {
   // Send progress update
   figma.ui.postMessage({
     type: 'progress',
-    message: `Analyzing ${allNodes.length} elements...`
+    message: `Analyzing ${allNodes.length} elements...`,
+    details: `Found ${allNodes.length} elements to analyze`
   });
 
   // First, analyze the selected frame itself
@@ -171,11 +179,15 @@ async function analyzeFrame(frame) {
     type: info.type
   })).sort((a, b) => a.hex.localeCompare(b.hex));
 
-  // Convert fonts Map to array with font and style info
-  const fontArray = Array.from(fonts.entries()).map(([fontString, info]) => ({
-    fontString: fontString,
-    styleName: info.styleName
-  })).sort((a, b) => a.fontString.localeCompare(b.fontString));
+  // Convert fonts Map to array with complete font info
+  const fontArray = Array.from(fonts.entries()).map(([fontKey, info]) => ({
+    fontKey: fontKey,
+    fontFamily: info.fontFamily,
+    fontStyle: info.fontStyle,
+    fontSize: info.fontSize,
+    styleName: info.styleName,
+    displayString: `${info.fontFamily} ${info.fontStyle} ${info.fontSize}px${info.styleName ? ` (${info.styleName})` : ''}`
+  })).sort((a, b) => a.displayString.localeCompare(b.displayString));
 
   // Convert textStyles Map to array with style and font info
   const textStyleArray = Array.from(textStyles.entries()).map(([styleName, fontInfo]) => ({
@@ -245,7 +257,37 @@ async function analyzeNode(node, components, fonts, colors, colorStyles, textSty
     if ('fontName' in node && node.fontName) {
       try {
         if (typeof node.fontName === 'object' && 'family' in node.fontName) {
-          const fontString = `${node.fontName.family} - ${node.fontName.style}`;
+          // Handle different font size scenarios
+          let fontSize = 'Unknown';
+
+          if (node.fontSize && typeof node.fontSize === 'number') {
+            fontSize = node.fontSize;
+          } else if (node.fontSize && typeof node.fontSize === 'object') {
+            // Mixed font sizes - use "Mixed" as indicator
+            fontSize = 'Mixed';
+          } else if (node.textStyleId) {
+            // Try to get font size from text style
+            try {
+              const style = await figma.getStyleByIdAsync(node.textStyleId);
+              if (style && style.fontSize) {
+                fontSize = style.fontSize;
+              }
+            } catch (error) {
+              // Keep as 'Unknown'
+            }
+          }
+
+          const fontDetail = `${node.fontName.family} ${node.fontName.style} ${fontSize}px`;
+          console.log(`Font detected: ${fontDetail} on node: ${node.name || node.type}`);
+
+          // Send progress update for font detection
+          figma.ui.postMessage({
+            type: 'progress',
+            message: 'Analyzing fonts and text...',
+            details: `Found font: ${fontDetail}`
+          });
+
+          const fontKey = `${node.fontName.family} - ${node.fontName.style} - ${fontSize}px`;
 
           // Check for text styles and associate with font
           let styleName = null;
@@ -258,7 +300,7 @@ async function analyzeNode(node, components, fonts, colors, colorStyles, textSty
                 textStyles.set(style.name, {
                   fontFamily: node.fontName.family,
                   fontStyle: node.fontName.style,
-                  fontSize: node.fontSize || 'Unknown'
+                  fontSize: fontSize
                 });
               }
             } catch (error) {
@@ -266,12 +308,17 @@ async function analyzeNode(node, components, fonts, colors, colorStyles, textSty
             }
           }
 
-          // Store font with its associated style (if any)
-          if (!fonts.has(fontString)) {
-            fonts.set(fontString, { styleName: styleName });
-          } else if (styleName && !fonts.get(fontString).styleName) {
+          // Store font with complete information including size
+          if (!fonts.has(fontKey)) {
+            fonts.set(fontKey, {
+              fontFamily: node.fontName.family,
+              fontStyle: node.fontName.style,
+              fontSize: fontSize,
+              styleName: styleName
+            });
+          } else if (styleName && !fonts.get(fontKey).styleName) {
             // Update with style name if we didn't have one before
-            fonts.get(fontString).styleName = styleName;
+            fonts.get(fontKey).styleName = styleName;
           }
         }
       } catch (error) {
@@ -286,6 +333,13 @@ async function analyzeNode(node, components, fonts, colors, colorStyles, textSty
         if (fill.type === 'SOLID' && fill.color && fill.visible !== false && fill.opacity !== 0) {
           const color = fill.color;
           const hex = rgbToHex(color.r, color.g, color.b);
+
+          // Send progress update for color detection
+          figma.ui.postMessage({
+            type: 'progress',
+            message: 'Analyzing colors...',
+            details: `Found fill color: ${hex}`
+          });
 
           // Check for fill styles and associate with color
           let styleName = null;
@@ -318,6 +372,13 @@ async function analyzeNode(node, components, fonts, colors, colorStyles, textSty
         if (stroke.type === 'SOLID' && stroke.color && stroke.visible !== false && stroke.opacity !== 0) {
           const color = stroke.color;
           const hex = rgbToHex(color.r, color.g, color.b);
+
+          // Send progress update for stroke color detection
+          figma.ui.postMessage({
+            type: 'progress',
+            message: 'Analyzing colors...',
+            details: `Found stroke color: ${hex}`
+          });
 
           // Check for stroke styles and associate with color
           let styleName = null;
@@ -481,6 +542,11 @@ async function createAnalysisFrame(originalFrame, analysisData) {
 
   // Add components section
   if (analysisData.components.length > 0) {
+    figma.ui.postMessage({
+      type: 'progress',
+      message: 'Building analysis frame...',
+      details: `Adding ${analysisData.components.length} components`
+    });
     currentY = await addComponentSection(analysisFrame, "Components Used", analysisData.components, currentY, padding);
   }
 
@@ -632,6 +698,421 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
   return currentY + frameClone.height + sizeLabel.height + 8;
 }
 
+// Create or update the summary analysis frame
+async function createOrUpdateSummaryAnalysis() {
+  // Find existing summary frame
+  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
+  let summaryFrame = allFrames.find(frame => frame.name === 'Summary Analysis');
+
+  // Collect data from all analysis frames
+  const summaryData = await collectSummaryData();
+
+  if (summaryFrame) {
+    // Clear existing content
+    summaryFrame.children.forEach(child => child.remove());
+  } else {
+    // Create new summary frame
+    summaryFrame = figma.createFrame();
+    summaryFrame.name = 'Summary Analysis';
+
+    // Position at the top-left of all analysis frames
+    const position = findSummaryPosition();
+    summaryFrame.x = position.x;
+    summaryFrame.y = position.y;
+
+    // Add to page
+    figma.currentPage.appendChild(summaryFrame);
+  }
+
+  // Style the summary frame
+  summaryFrame.fills = [{ type: 'SOLID', color: { r: 0.9, g: 0.95, b: 1.0 } }]; // Light blue tint
+  summaryFrame.cornerRadius = 12;
+  summaryFrame.effects = [{
+    type: 'DROP_SHADOW',
+    color: { r: 0, g: 0, b: 0, a: 0.15 },
+    offset: { x: 0, y: 4 },
+    radius: 12,
+    visible: true,
+    blendMode: 'NORMAL'
+  }];
+
+  // Populate summary content
+  await populateSummaryContent(summaryFrame, summaryData);
+}
+
+// Store analysis data globally to avoid re-analysis
+const globalAnalysisData = new Map();
+
+// Store analysis data for summary
+function storeAnalysisData(frameName, analysisData) {
+  globalAnalysisData.set(frameName, analysisData);
+  console.log(`Stored analysis data for: ${frameName}`);
+  console.log(`Components: ${analysisData.components ? analysisData.components.length : 0}`);
+  console.log(`Fonts: ${analysisData.fonts ? analysisData.fonts.length : 0}`);
+  console.log(`Colors: ${analysisData.colors ? analysisData.colors.length : 0}`);
+}
+
+// Collect aggregated data from stored analysis data
+async function collectSummaryData() {
+  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
+  const analysisFrames = allFrames.filter(frame => frame.name.startsWith('Analysis: '));
+
+  const aggregatedComponents = new Map();
+  const aggregatedFonts = new Map();
+  const aggregatedColors = new Map();
+  const frameCount = analysisFrames.length;
+
+  console.log(`Collecting summary data from ${globalAnalysisData.size} stored analyses`);
+  console.log(`Found ${frameCount} analysis frames on page`);
+
+  // Always re-analyze existing frames to ensure we have complete data
+  console.log('Re-analyzing all existing frames to ensure complete summary...');
+
+  for (const analysisFrame of analysisFrames) {
+    const originalFrameName = analysisFrame.name.replace('Analysis: ', '');
+    const originalFrame = allFrames.find(frame =>
+      frame.name === originalFrameName && !frame.name.startsWith('Analysis:') && !frame.name.startsWith('Summary')
+    );
+
+    if (originalFrame) {
+      try {
+        console.log(`Re-analyzing frame: ${originalFrameName}`);
+        const frameData = await analyzeFrame(originalFrame);
+        globalAnalysisData.set(originalFrameName, frameData);
+      } catch (error) {
+        console.warn(`Could not re-analyze frame: ${originalFrameName}`, error);
+      }
+    }
+  }
+
+  // Aggregate data from stored analysis results
+  for (const [frameName, analysisData] of globalAnalysisData.entries()) {
+    console.log(`Processing stored data for: ${frameName}`);
+    console.log(`  Components: ${analysisData.components ? analysisData.components.length : 0}`);
+    console.log(`  Fonts: ${analysisData.fonts ? analysisData.fonts.length : 0}`);
+    console.log(`  Colors: ${analysisData.colors ? analysisData.colors.length : 0}`);
+
+    // Aggregate components (unique by master name + variant name)
+    if (analysisData.components) {
+      analysisData.components.forEach(comp => {
+        const key = comp.isVariant ? `${comp.masterName}:${comp.variantName}` : comp.masterName;
+        if (!aggregatedComponents.has(key)) {
+          aggregatedComponents.set(key, comp);
+          console.log(`  Added component: ${key}`);
+        }
+      });
+    }
+
+    // Aggregate fonts (unique by font key which includes size)
+    if (analysisData.fonts) {
+      analysisData.fonts.forEach(font => {
+        const fontKey = font.fontKey || font.displayString || font.fontString || font;
+        if (!aggregatedFonts.has(fontKey)) {
+          aggregatedFonts.set(fontKey, font);
+          console.log(`  Added font: ${fontKey}`);
+        }
+      });
+    }
+
+    // Aggregate colors (unique by hex value)
+    if (analysisData.colors) {
+      analysisData.colors.forEach(color => {
+        const colorKey = color.hex || color;
+        if (!aggregatedColors.has(colorKey)) {
+          aggregatedColors.set(colorKey, color);
+          console.log(`  Added color: ${colorKey}`);
+        }
+      });
+    }
+  }
+
+  const result = {
+    frameCount: frameCount,
+    totalComponents: aggregatedComponents.size,
+    totalFonts: aggregatedFonts.size,
+    totalColors: aggregatedColors.size,
+    components: Array.from(aggregatedComponents.values()),
+    fonts: Array.from(aggregatedFonts.values()),
+    colors: Array.from(aggregatedColors.values())
+  };
+
+  console.log(`Summary result: ${result.totalComponents} components, ${result.totalFonts} fonts, ${result.totalColors} colors`);
+
+  return result;
+}
+
+// Find the best position for the summary frame
+function findSummaryPosition() {
+  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
+  const analysisFrames = allFrames.filter(frame => frame.name.startsWith('Analysis: '));
+
+  if (analysisFrames.length === 0) {
+    return { x: 100, y: 100 };
+  }
+
+  // Position above the first analysis frame
+  const firstFrame = analysisFrames[0];
+  return {
+    x: firstFrame.x,
+    y: firstFrame.y - 800 // 800px above the first analysis frame
+  };
+}
+
+// Populate the summary frame with content
+async function populateSummaryContent(summaryFrame, summaryData) {
+  const padding = 50;
+  let currentY = padding;
+
+  // Summary title
+  const title = figma.createText();
+  const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  title.fontName = titleFont;
+  title.fontSize = 32;
+  title.characters = 'Summary Analysis';
+  title.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }];
+  title.x = Number(padding);
+  title.y = Number(currentY);
+  summaryFrame.appendChild(title);
+  currentY = Number(currentY) + Number(title.height) + 16;
+
+  // Frame count subtitle
+  const subtitle = figma.createText();
+  const subtitleFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+  subtitle.fontName = subtitleFont;
+  subtitle.fontSize = 14;
+  subtitle.characters = `${summaryData.frameCount} frames analyzed`;
+  subtitle.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+  subtitle.x = Number(padding);
+  subtitle.y = Number(currentY);
+  summaryFrame.appendChild(subtitle);
+  currentY = Number(currentY) + Number(subtitle.height) + 32;
+
+  // Components section
+  if (summaryData.totalComponents > 0) {
+    currentY = await addSummaryComponentsSection(summaryFrame, summaryData.components, currentY, padding);
+  }
+
+  // Fonts section
+  if (summaryData.totalFonts > 0) {
+    currentY = await addSummaryFontsSection(summaryFrame, summaryData.fonts, currentY, padding);
+  }
+
+  // Colors section
+  if (summaryData.totalColors > 0) {
+    currentY = await addSummaryColorsSection(summaryFrame, summaryData.colors, currentY, padding);
+  }
+
+  // Summary stats
+  const statsText = figma.createText();
+  const statsFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  statsText.fontName = statsFont;
+  statsText.fontSize = 16;
+  statsText.characters = `Total: ${summaryData.totalComponents} Components • ${summaryData.totalFonts} Fonts • ${summaryData.totalColors} Colors`;
+  statsText.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+  statsText.x = Number(padding);
+  statsText.y = Number(currentY);
+  summaryFrame.appendChild(statsText);
+  currentY = Number(currentY) + Number(statsText.height) + 16;
+
+  // Note about detailed analysis
+  const noteText = figma.createText();
+  const noteFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+  noteText.fontName = noteFont;
+  noteText.fontSize = 12;
+  noteText.characters = 'This summary updates automatically when you analyze new frames.\nDetailed breakdowns are available in individual frame analyses.';
+  noteText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }];
+  noteText.x = Number(padding);
+  noteText.y = Number(currentY);
+  summaryFrame.appendChild(noteText);
+  currentY = Number(currentY) + Number(noteText.height) + Number(padding);
+
+  // Calculate required width by checking all child elements
+  let maxWidth = 0;
+  for (const child of summaryFrame.children) {
+    const childRight = child.x + child.width;
+    maxWidth = Math.max(maxWidth, childRight);
+  }
+
+  // Resize summary frame with content-based width
+  const minWidth = 600;
+  const contentWidth = maxWidth + (padding * 2); // Add extra padding to the right
+  const finalWidth = Math.max(minWidth, contentWidth);
+  const finalHeight = currentY;
+  summaryFrame.resize(finalWidth, finalHeight);
+}
+
+// Add a summary section with items
+async function addSummarySection(frame, title, items, startY, padding) {
+  // Ensure all parameters are numbers
+  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
+  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+
+  // Section title
+  const sectionTitle = figma.createText();
+  const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  sectionTitle.fontName = titleFont;
+  sectionTitle.fontSize = 16;
+  sectionTitle.characters = title;
+  sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+  sectionTitle.x = safePadding;
+  sectionTitle.y = safeStartY;
+  frame.appendChild(sectionTitle);
+
+  let currentY = safeStartY + sectionTitle.height + 12;
+
+  // List items (max 10 to keep summary concise)
+  const displayItems = items.slice(0, 10);
+  for (const item of displayItems) {
+    const itemText = figma.createText();
+    const itemFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    itemText.fontName = itemFont;
+    itemText.fontSize = 12;
+    itemText.characters = `• ${item}`;
+    itemText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+    itemText.x = safePadding + 12;
+    itemText.y = currentY;
+    frame.appendChild(itemText);
+    currentY = currentY + itemText.height + 4;
+  }
+
+  // Show "and X more" if there are more items
+  if (items.length > 10) {
+    const moreText = figma.createText();
+    const moreFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    moreText.fontName = moreFont;
+    moreText.fontSize = 12;
+    moreText.characters = `• and ${items.length - 10} more...`;
+    moreText.fills = [{ type: 'SOLID', color: { r: 0.6, g: 0.6, b: 0.6 } }];
+    moreText.x = safePadding + 12;
+    moreText.y = currentY;
+    frame.appendChild(moreText);
+    currentY = currentY + moreText.height + 4;
+  }
+
+  return currentY + 20;
+}
+
+// Add summary components section
+async function addSummaryComponentsSection(frame, components, startY, padding) {
+  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
+  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+
+  // Section title
+  const sectionTitle = figma.createText();
+  const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  sectionTitle.fontName = titleFont;
+  sectionTitle.fontSize = 16;
+  sectionTitle.characters = `Components Used (${components.length})`;
+  sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+  sectionTitle.x = safePadding;
+  sectionTitle.y = safeStartY;
+  frame.appendChild(sectionTitle);
+
+  let currentY = safeStartY + sectionTitle.height + 12;
+
+  // List components
+  for (const comp of components) {
+    const compText = figma.createText();
+    const compFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    compText.fontName = compFont;
+    compText.fontSize = 12;
+    compText.characters = `• ${comp.masterName}${comp.isVariant ? ` (${comp.variantName})` : ''}`;
+    compText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+    compText.x = safePadding + 12;
+    compText.y = currentY;
+    frame.appendChild(compText);
+    currentY = currentY + compText.height + 4;
+  }
+
+  return currentY + 20;
+}
+
+// Add summary fonts section
+async function addSummaryFontsSection(frame, fonts, startY, padding) {
+  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
+  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+
+  // Section title
+  const sectionTitle = figma.createText();
+  const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  sectionTitle.fontName = titleFont;
+  sectionTitle.fontSize = 16;
+  sectionTitle.characters = `Fonts & Text Styles (${fonts.length})`;
+  sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+  sectionTitle.x = safePadding;
+  sectionTitle.y = safeStartY;
+  frame.appendChild(sectionTitle);
+
+  let currentY = safeStartY + sectionTitle.height + 12;
+
+  // List fonts with complete information
+  for (const font of fonts) {
+    const fontText = figma.createText();
+    const fontFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    fontText.fontName = fontFont;
+    fontText.fontSize = 12;
+    const displayString = font.displayString || font.fontString || font;
+    fontText.characters = `• ${displayString}`;
+    fontText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+    fontText.x = safePadding + 12;
+    fontText.y = currentY;
+    frame.appendChild(fontText);
+    currentY = currentY + fontText.height + 4;
+  }
+
+  return currentY + 20;
+}
+
+// Add summary colors section
+async function addSummaryColorsSection(frame, colors, startY, padding) {
+  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
+  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+
+  // Section title
+  const sectionTitle = figma.createText();
+  const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  sectionTitle.fontName = titleFont;
+  sectionTitle.fontSize = 16;
+  sectionTitle.characters = `Colors & Styles (${colors.length})`;
+  sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+  sectionTitle.x = safePadding;
+  sectionTitle.y = safeStartY;
+  frame.appendChild(sectionTitle);
+
+  let currentY = safeStartY + sectionTitle.height + 12;
+
+  // List colors with swatches
+  for (const color of colors) {
+    const colorHex = color.hex || color;
+    const rgb = hexToRgb(colorHex);
+
+    // Color swatch
+    const swatch = figma.createRectangle();
+    swatch.resize(16, 16);
+    swatch.x = safePadding + 12;
+    swatch.y = currentY + 2;
+    swatch.fills = [{ type: 'SOLID', color: rgb }];
+    swatch.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
+    swatch.strokeWeight = 1;
+    frame.appendChild(swatch);
+
+    // Color text
+    const colorText = figma.createText();
+    const colorFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    colorText.fontName = colorFont;
+    colorText.fontSize = 12;
+    const styleName = color.styleName ? ` (${color.styleName})` : '';
+    colorText.characters = `${colorHex}${styleName}`;
+    colorText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+    colorText.x = safePadding + 36;
+    colorText.y = currentY;
+    frame.appendChild(colorText);
+    currentY = currentY + Math.max(colorText.height, 20) + 4;
+  }
+
+  return currentY + 20;
+}
+
 // Add a component section with instance counts
 async function addComponentSection(frame, title, components, startY, padding) {
   // Section title
@@ -772,12 +1253,14 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
   // Add any fonts that don't have text styles
   if (fonts.length > 0) {
     for (const font of fonts) {
-      const fontKey = font.fontString || font; // Handle both old and new format
+      const fontKey = font.fontKey || font.fontString || font; // Handle new and old formats
       if (!allFonts.has(fontKey)) {
         allFonts.set(fontKey, {
-          fontString: fontKey,
+          fontString: font.displayString || font.fontString || fontKey,
           styleName: font.styleName || null,
-          fontSize: null
+          fontSize: font.fontSize || null,
+          fontFamily: font.fontFamily || null,
+          fontStyle: font.fontStyle || null
         });
       }
     }
@@ -808,7 +1291,10 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
       fontText.fontName = fontFont;
       fontText.fontSize = 12;
 
-      const displayText = `${fontInfo.fontString} - ${fontInfo.styleName}`;
+      // Enhanced display with font family, style, size, and text style name
+      const displayText = fontInfo.fontString.includes('px')
+        ? `${fontInfo.fontString} - ${fontInfo.styleName}`
+        : `${fontInfo.fontString} - ${fontInfo.styleName}`;
       fontText.characters = `• ${displayText}`;
       fontText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
       fontText.x = padding + 12;
@@ -824,6 +1310,7 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
       fontText.fontName = fontFont;
       fontText.fontSize = 12;
 
+      // Show enhanced font information even without text styles
       fontText.characters = `• ${fontInfo.fontString}`;
       fontText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }]; // Slightly lighter color
       fontText.x = padding + 12;
