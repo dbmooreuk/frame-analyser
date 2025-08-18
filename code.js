@@ -168,8 +168,11 @@ async function analyzeFrame(frame) {
   const textStyles = new Map(); // Change to Map to store text style with font info
   const effectStyles = new Set();
 
-  // Find all nodes within the frame
-  const allNodes = frame.findAll();
+  // Find all nodes within the frame (optimized to exclude very small/hidden nodes)
+  const allNodes = frame.findAll(node => {
+    // Skip invisible nodes and very small nodes for performance
+    return node.visible !== false && (node.width >= 1 || node.height >= 1);
+  });
 
   // Send progress update
   figma.ui.postMessage({
@@ -181,26 +184,32 @@ async function analyzeFrame(frame) {
   // First, analyze the selected frame itself
   await analyzeNode(frame, components, fonts, colors, colorStyles, textStyles, effectStyles);
 
-  // Then analyze all child nodes within the frame (batched for performance)
-  const batchSize = 50;
+  // Then analyze all child nodes within the frame (sequential to avoid memory issues)
+  const batchSize = 50; // Smaller batches to reduce memory pressure
   for (let i = 0; i < allNodes.length; i += batchSize) {
     const batch = allNodes.slice(i, i + batchSize);
 
-    // Process batch
+    // Process batch sequentially to avoid null pointer issues
     for (const node of batch) {
       try {
-        await analyzeNode(node, components, icons, fonts, colors, colorStyles, textStyles, effectStyles);
+        // Validate node still exists before processing
+        if (node && node.type && node.removed !== true) {
+          await analyzeNode(node, components, icons, fonts, colors, colorStyles, textStyles, effectStyles);
+        }
       } catch (error) {
         // Silently handle node processing errors
+        console.warn('Node processing error:', error.message);
       }
     }
 
-    // Update progress after each batch
+    // Update progress less frequently (every 200 elements or at end)
     const processed = Math.min(i + batchSize, allNodes.length);
-    figma.ui.postMessage({
-      type: 'progress',
-      message: `Processed ${processed}/${allNodes.length} elements...`
-    });
+    if (processed % 200 === 0 || processed === allNodes.length) {
+      figma.ui.postMessage({
+        type: 'progress',
+        message: `Processed ${processed}/${allNodes.length} elements...`
+      });
+    }
   }
 
   // Convert colors Map to array with hex and style info
@@ -272,18 +281,38 @@ function isComponentAnIcon(mainComponent, instanceNode) {
   return componentStartsWithLowercase || masterStartsWithLowercase;
 }
 
-// Analyze a single node for components, fonts, colors, and styles
+// Analyze a single node for components, fonts, colors, and styles (optimized)
 async function analyzeNode(node, components, icons, fonts, colors, colorStyles, textStyles, effectStyles) {
   try {
-    // Extract components
+    // Validate node exists and is accessible
+    if (!node || !node.type || node.removed === true) {
+      return;
+    }
+
+    // Early exit for invisible or very small nodes (performance optimization)
+    if (node.visible === false || (node.width < 1 && node.height < 1)) {
+      return;
+    }
+
+    // Extract components (with defensive programming)
     if (node.type === 'INSTANCE') {
       try {
+        // Validate instance node is still accessible
+        if (!node.mainComponent) {
+          return; // Skip if main component reference is broken
+        }
+
         const mainComponent = await node.getMainComponentAsync();
-        if (mainComponent) {
-          // Get the master component (parent of variants)
-          const masterComponent = mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET'
+        if (mainComponent && mainComponent.name && (mainComponent.key || mainComponent.id)) {
+          // Get the master component (parent of variants) with validation
+          const masterComponent = (mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET')
             ? mainComponent.parent
             : mainComponent;
+
+          // Validate master component exists and has a name
+          if (!masterComponent || !masterComponent.name) {
+            return;
+          }
 
           // Create a unique key for this specific variant
           const variantKey = mainComponent.key || mainComponent.id;
@@ -307,11 +336,15 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
               isIcon: isIcon
             });
           } else {
-            targetMap.get(variantKey).instanceCount++;
+            const existing = targetMap.get(variantKey);
+            if (existing) {
+              existing.instanceCount++;
+            }
           }
         }
       } catch (error) {
-        // Silently handle inaccessible components
+        // Silently handle inaccessible components to prevent crashes
+        console.warn('Component analysis error:', error.message);
       }
     }
 
@@ -495,13 +528,79 @@ async function getBestAvailableFont(preferredStyle = "Regular") {
   return availableFonts[0] || { family: "Arial", style: "Regular" };
 }
 
-// Helper functions for common font styles (generic, not project-specific)
+// Helper functions for common font styles (completely generic)
 async function getAnalysisTitleFont() {
-  return await loadFontSafely(await getBestAvailableFont("Bold"));
+  try {
+    const availableFonts = await getAvailableFonts();
+    // Look for any Bold font in the document
+    const boldFont = availableFonts.find(font =>
+      font.style.toLowerCase().includes('bold')
+    );
+
+    if (boldFont) {
+      return await loadFontCached(boldFont);
+    }
+
+    // Fallback to first available font
+    return await loadFontCached(availableFonts[0]);
+  } catch (error) {
+    // Ultimate fallback to system fonts
+    const systemFonts = [
+      { family: "Arial", style: "Regular" },
+      { family: "Helvetica", style: "Regular" },
+      { family: "Times", style: "Regular" }
+    ];
+
+    for (const font of systemFonts) {
+      try {
+        await figma.loadFontAsync(font);
+        return font;
+      } catch (e) {
+        continue;
+      }
+    }
+
+    // If everything fails, return Arial
+    return { family: "Arial", style: "Regular" };
+  }
 }
 
 async function getAnalysisBodyFont() {
-  return await loadFontSafely(await getBestAvailableFont("Regular"));
+  try {
+    const availableFonts = await getAvailableFonts();
+    // Look for any Regular font in the document
+    const regularFont = availableFonts.find(font =>
+      font.style.toLowerCase().includes('regular') ||
+      font.style.toLowerCase().includes('normal') ||
+      font.style.toLowerCase() === 'medium'
+    );
+
+    if (regularFont) {
+      return await loadFontCached(regularFont);
+    }
+
+    // Fallback to first available font
+    return await loadFontCached(availableFonts[0]);
+  } catch (error) {
+    // Ultimate fallback to system fonts
+    const systemFonts = [
+      { family: "Arial", style: "Regular" },
+      { family: "Helvetica", style: "Regular" },
+      { family: "Times", style: "Regular" }
+    ];
+
+    for (const font of systemFonts) {
+      try {
+        await figma.loadFontAsync(font);
+        return font;
+      } catch (e) {
+        continue;
+      }
+    }
+
+    // If everything fails, return Arial
+    return { family: "Arial", style: "Regular" };
+  }
 }
 
 // Safe font loading with fallbacks (now uses document fonts, not project-specific)
@@ -839,40 +938,72 @@ const globalAnalysisData = new Map();
 // Font cache to avoid repeated font loading (major performance improvement)
 const fontCache = new Map();
 let availableFonts = null;
+let fontScanPromise = null; // Prevent multiple concurrent scans
 
-// Get available fonts in the document
+// Get available fonts in the document (optimized with caching)
 async function getAvailableFonts() {
   if (availableFonts) return availableFonts;
 
-  // Get all text nodes in the document to find available fonts
-  const allTextNodes = figma.currentPage.findAll(node => node.type === 'TEXT');
-  const foundFonts = new Set();
+  // Prevent multiple concurrent font scans
+  if (fontScanPromise) return fontScanPromise;
 
-  for (const textNode of allTextNodes.slice(0, 50)) { // Check first 50 text nodes for performance
-    if (textNode.fontName && typeof textNode.fontName === 'object') {
-      foundFonts.add(`${textNode.fontName.family}-${textNode.fontName.style}`);
+  fontScanPromise = (async () => {
+    const foundFonts = new Set();
+
+    // Quick scan: Check only text nodes in the current selection area first
+    const selection = figma.currentPage.selection;
+    if (selection.length > 0) {
+      for (const selectedNode of selection) {
+        try {
+          if (selectedNode && selectedNode.findAll) {
+            const textNodes = selectedNode.findAll(node => node && node.type === 'TEXT');
+            for (const textNode of textNodes.slice(0, 10)) { // Quick sample
+              if (textNode && textNode.fontName && typeof textNode.fontName === 'object' &&
+                  textNode.fontName.family && textNode.fontName.style) {
+                foundFonts.add(`${textNode.fontName.family}-${textNode.fontName.style}`);
+              }
+            }
+          }
+        } catch (error) {
+          // Skip problematic nodes
+          console.warn('Font scan error:', error.message);
+        }
+      }
     }
-  }
 
-  // Convert to array of font objects
-  availableFonts = Array.from(foundFonts).map(fontKey => {
-    const [family, style] = fontKey.split('-');
-    return { family, style };
-  });
+    // If we found fonts in selection, use those. Otherwise, do a broader scan
+    if (foundFonts.size === 0) {
+      try {
+        const allTextNodes = figma.currentPage.findAll(node => node && node.type === 'TEXT');
+        for (const textNode of allTextNodes.slice(0, 20)) { // Reduced from 50 to 20
+          if (textNode && textNode.fontName && typeof textNode.fontName === 'object' &&
+              textNode.fontName.family && textNode.fontName.style) {
+            foundFonts.add(`${textNode.fontName.family}-${textNode.fontName.style}`);
+          }
+        }
+      } catch (error) {
+        // Skip if page scan fails
+        console.warn('Page font scan error:', error.message);
+      }
+    }
 
-  // If no fonts found, use common system fonts
-  if (availableFonts.length === 0) {
-    availableFonts = [
-      { family: "Inter", style: "Regular" },
-      { family: "Roboto", style: "Regular" },
+    // Convert to array of font objects
+    const fonts = Array.from(foundFonts).map(fontKey => {
+      const [family, style] = fontKey.split('-');
+      return { family, style };
+    });
+
+    // If no fonts found, use universal system fonts (guaranteed to exist)
+    availableFonts = fonts.length > 0 ? fonts : [
       { family: "Arial", style: "Regular" },
       { family: "Helvetica", style: "Regular" },
-      { family: "SF Pro Text", style: "Regular" },
-      { family: "Segoe UI", style: "Regular" }
+      { family: "Times", style: "Regular" }
     ];
-  }
 
-  return availableFonts;
+    return availableFonts;
+  })();
+
+  return fontScanPromise;
 }
 
 async function loadFontCached(fontName) {
