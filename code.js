@@ -181,23 +181,26 @@ async function analyzeFrame(frame) {
   // First, analyze the selected frame itself
   await analyzeNode(frame, components, fonts, colors, colorStyles, textStyles, effectStyles);
 
-  // Then analyze all child nodes within the frame
-  for (let i = 0; i < allNodes.length; i++) {
-    const node = allNodes[i];
+  // Then analyze all child nodes within the frame (batched for performance)
+  const batchSize = 50;
+  for (let i = 0; i < allNodes.length; i += batchSize) {
+    const batch = allNodes.slice(i, i + batchSize);
 
-    try {
-      await analyzeNode(node, components, icons, fonts, colors, colorStyles, textStyles, effectStyles);
-    } catch (error) {
-      // Silently handle node processing errors
+    // Process batch
+    for (const node of batch) {
+      try {
+        await analyzeNode(node, components, icons, fonts, colors, colorStyles, textStyles, effectStyles);
+      } catch (error) {
+        // Silently handle node processing errors
+      }
     }
 
-    // Update progress periodically
-    if (i % 50 === 0) {
-      figma.ui.postMessage({
-        type: 'progress',
-        message: `Processed ${i + 1}/${allNodes.length} elements...`
-      });
-    }
+    // Update progress after each batch
+    const processed = Math.min(i + batchSize, allNodes.length);
+    figma.ui.postMessage({
+      type: 'progress',
+      message: `Processed ${processed}/${allNodes.length} elements...`
+    });
   }
 
   // Convert colors Map to array with hex and style info
@@ -339,12 +342,7 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
           const fontDetail = `${node.fontName.family} ${node.fontName.style} ${fontSize}px`;
           console.log(`Font detected: ${fontDetail} on node: ${node.name || node.type}`);
 
-          // Send progress update for font detection
-          figma.ui.postMessage({
-            type: 'progress',
-            message: 'Analyzing fonts and text...',
-            details: `Found font: ${fontDetail}`
-          });
+          // Font detection progress removed for performance
 
           const fontKey = `${node.fontName.family} - ${node.fontName.style} - ${fontSize}px`;
 
@@ -393,12 +391,7 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
           const color = fill.color;
           const hex = rgbToHex(color.r, color.g, color.b);
 
-          // Send progress update for color detection
-          figma.ui.postMessage({
-            type: 'progress',
-            message: 'Analyzing colors...',
-            details: `Found fill color: ${hex}`
-          });
+          // Color detection progress removed for performance
 
           // Check for fill styles and associate with color
           let styleName = null;
@@ -432,12 +425,7 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
           const color = stroke.color;
           const hex = rgbToHex(color.r, color.g, color.b);
 
-          // Send progress update for stroke color detection
-          figma.ui.postMessage({
-            type: 'progress',
-            message: 'Analyzing colors...',
-            details: `Found stroke color: ${hex}`
-          });
+          // Stroke color detection progress removed for performance
 
           // Check for stroke styles and associate with color
           let styleName = null;
@@ -490,23 +478,55 @@ function rgbToHex(r, g, b) {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
 }
 
-// Safe font loading with fallbacks
-async function loadFontSafely(fontName) {
-  try {
-    await figma.loadFontAsync(fontName);
-    return fontName;
-  } catch (error) {
-    // Try fallbacks silently
+// Get the best available font for analysis output (generic, not project-specific)
+async function getBestAvailableFont(preferredStyle = "Regular") {
+  const availableFonts = await getAvailableFonts();
 
-    // Try common fallbacks
-    const fallbacks = [
-      { family: "Inter", style: "Regular" },
-      { family: "Roboto", style: "Regular" },
+  // Look for a font with the preferred style
+  const fontWithStyle = availableFonts.find(font =>
+    font.style.toLowerCase().includes(preferredStyle.toLowerCase())
+  );
+
+  if (fontWithStyle) {
+    return fontWithStyle;
+  }
+
+  // Fallback to first available font
+  return availableFonts[0] || { family: "Arial", style: "Regular" };
+}
+
+// Helper functions for common font styles (generic, not project-specific)
+async function getAnalysisTitleFont() {
+  return await loadFontSafely(await getBestAvailableFont("Bold"));
+}
+
+async function getAnalysisBodyFont() {
+  return await loadFontSafely(await getBestAvailableFont("Regular"));
+}
+
+// Safe font loading with fallbacks (now uses document fonts, not project-specific)
+async function loadFontSafely(requestedFont = null) {
+  try {
+    // If a specific font is requested, try it first
+    if (requestedFont) {
+      const font = await loadFontCached(requestedFont);
+      if (font) return font;
+    }
+
+    // Otherwise, get the best available font from the document
+    const preferredStyle = (requestedFont && requestedFont.style) ? requestedFont.style : "Regular";
+    const bestFont = await getBestAvailableFont(preferredStyle);
+    return await loadFontCached(bestFont);
+  } catch (error) {
+    console.warn(`Font loading failed, using system fallback`);
+    // Final fallback to system fonts
+    const systemFallbacks = [
       { family: "Arial", style: "Regular" },
-      { family: "Helvetica", style: "Regular" }
+      { family: "Helvetica", style: "Regular" },
+      { family: "Times", style: "Regular" }
     ];
 
-    for (const fallback of fallbacks) {
+    for (const fallback of systemFallbacks) {
       try {
         await figma.loadFontAsync(fallback);
         return fallback;
@@ -515,14 +535,18 @@ async function loadFontSafely(fontName) {
       }
     }
 
-    // If all else fails, use the default font
-    throw new Error('No suitable font could be loaded');
+    // If everything fails, return Arial Regular
+    return { family: "Arial", style: "Regular" };
   }
 }
 
 // Create the analysis frame with extracted information
 async function createAnalysisFrame(originalFrame, analysisData) {
   try {
+    // Ensure we have valid analysis data
+    if (!analysisData) {
+      throw new Error('Analysis data is missing');
+    }
     // Check if an analysis frame already exists for this original frame
     const existingAnalysisFrame = findExistingAnalysisFrame(originalFrame);
 
@@ -573,7 +597,7 @@ async function createAnalysisFrame(originalFrame, analysisData) {
 
     // Add frame name as the first item (32px Bold #000000)
     const frameName = figma.createText();
-    const frameNameFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+    const frameNameFont = await loadFontSafely(await getBestAvailableFont("Bold"));
     frameName.fontName = frameNameFont;
     frameName.fontSize = 32;
     frameName.characters = analysisData.frameInfo.name;
@@ -585,7 +609,7 @@ async function createAnalysisFrame(originalFrame, analysisData) {
 
     // Add element count subtitle
     const subtitle = figma.createText();
-    const subtitleFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    const subtitleFont = await loadFontSafely(await getBestAvailableFont("Regular"));
     subtitle.fontName = subtitleFont;
     subtitle.fontSize = 14;
     subtitle.characters = `${analysisData.frameInfo.elementCount} elements`;
@@ -722,7 +746,7 @@ function findBestAnalysisPosition(originalFrame) {
 async function addFrameReference(analysisFrame, originalFrame, startY, padding) {
   // Create a label for the reference
   const referenceLabel = figma.createText();
-  const labelFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  const labelFont = await loadFontSafely(await getBestAvailableFont("Bold"));
   referenceLabel.fontName = labelFont;
   referenceLabel.fontSize = 14;
   referenceLabel.characters = "Visual Reference:";
@@ -755,7 +779,7 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
 
   // Add a size indicator
   const sizeLabel = figma.createText();
-  const sizeLabelFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+  const sizeLabelFont = await loadFontSafely(await getBestAvailableFont("Regular"));
   sizeLabel.fontName = sizeLabelFont;
   sizeLabel.fontSize = 10;
   sizeLabel.characters = `Displayed at ${targetWidth} x ${targetHeight}px`;
@@ -811,6 +835,92 @@ async function createOrUpdateSummaryAnalysis() {
 
 // Store analysis data globally to avoid re-analysis
 const globalAnalysisData = new Map();
+
+// Font cache to avoid repeated font loading (major performance improvement)
+const fontCache = new Map();
+let availableFonts = null;
+
+// Get available fonts in the document
+async function getAvailableFonts() {
+  if (availableFonts) return availableFonts;
+
+  // Get all text nodes in the document to find available fonts
+  const allTextNodes = figma.currentPage.findAll(node => node.type === 'TEXT');
+  const foundFonts = new Set();
+
+  for (const textNode of allTextNodes.slice(0, 50)) { // Check first 50 text nodes for performance
+    if (textNode.fontName && typeof textNode.fontName === 'object') {
+      foundFonts.add(`${textNode.fontName.family}-${textNode.fontName.style}`);
+    }
+  }
+
+  // Convert to array of font objects
+  availableFonts = Array.from(foundFonts).map(fontKey => {
+    const [family, style] = fontKey.split('-');
+    return { family, style };
+  });
+
+  // If no fonts found, use common system fonts
+  if (availableFonts.length === 0) {
+    availableFonts = [
+      { family: "Inter", style: "Regular" },
+      { family: "Roboto", style: "Regular" },
+      { family: "Arial", style: "Regular" },
+      { family: "Helvetica", style: "Regular" },
+      { family: "SF Pro Text", style: "Regular" },
+      { family: "Segoe UI", style: "Regular" }
+    ];
+  }
+
+  return availableFonts;
+}
+
+async function loadFontCached(fontName) {
+  const key = `${fontName.family}-${fontName.style}`;
+  if (!fontCache.has(key)) {
+    try {
+      await figma.loadFontAsync(fontName);
+      fontCache.set(key, fontName);
+      return fontName;
+    } catch (error) {
+      // Try fonts available in the document first
+      const availableFonts = await getAvailableFonts();
+
+      for (const availableFont of availableFonts) {
+        try {
+          await figma.loadFontAsync(availableFont);
+          fontCache.set(key, availableFont);
+          return availableFont;
+        } catch (fallbackError) {
+          continue;
+        }
+      }
+
+      // If all available fonts fail, try common system fonts
+      const systemFallbacks = [
+        { family: "Inter", style: "Regular" },
+        { family: "Roboto", style: "Regular" },
+        { family: "Arial", style: "Regular" },
+        { family: "Helvetica", style: "Regular" }
+      ];
+
+      for (const fallback of systemFallbacks) {
+        try {
+          await figma.loadFontAsync(fallback);
+          fontCache.set(key, fallback);
+          return fallback;
+        } catch (fallbackError) {
+          continue;
+        }
+      }
+
+      // If all fallbacks fail, cache and return the original font
+      fontCache.set(key, fontName);
+      return fontName;
+    }
+  }
+  return fontCache.get(key);
+}
 
 // Store analysis data for summary
 function storeAnalysisData(frameName, analysisData) {
@@ -958,7 +1068,7 @@ async function populateSummaryContent(summaryFrame, summaryData) {
 
   // Summary title
   const title = figma.createText();
-  const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  const titleFont = await loadFontSafely(await getBestAvailableFont("Bold"));
   title.fontName = titleFont;
   title.fontSize = 32;
   title.characters = 'Summary Analysis';
@@ -970,7 +1080,7 @@ async function populateSummaryContent(summaryFrame, summaryData) {
 
   // Frame count subtitle
   const subtitle = figma.createText();
-  const subtitleFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+  const subtitleFont = await loadFontSafely(await getBestAvailableFont("Regular"));
   subtitle.fontName = subtitleFont;
   subtitle.fontSize = 14;
   subtitle.characters = `${summaryData.frameCount} frames analyzed`;
@@ -1047,7 +1157,7 @@ async function addSummarySection(frame, title, items, startY, padding) {
 
   // Section title
   const sectionTitle = figma.createText();
-  const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  const titleFont = await getAnalysisTitleFont();
   sectionTitle.fontName = titleFont;
   sectionTitle.fontSize = 16;
   sectionTitle.characters = title;
@@ -1062,7 +1172,7 @@ async function addSummarySection(frame, title, items, startY, padding) {
   const displayItems = items.slice(0, 10);
   for (const item of displayItems) {
     const itemText = figma.createText();
-    const itemFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    const itemFont = await getAnalysisBodyFont();
     itemText.fontName = itemFont;
     itemText.fontSize = 12;
     itemText.characters = `• ${item}`;
