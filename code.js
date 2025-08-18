@@ -645,8 +645,8 @@ async function createAnalysisFrame(originalFrame, analysisData) {
     }
 
     // Set frame size with minimum dimensions and content-based width
-    // Minimum width needs to accommodate the 968px frame reference plus padding
-    const minWidth = 968 + (padding * 2); // 968px + 100px padding = 1068px minimum
+    // Minimum width needs to accommodate the original frame reference plus padding
+    const minWidth = originalFrame.width + (padding * 2); // Original frame width + padding
     const minHeight = 200;
     const contentWidth = maxWidth + (padding * 2); // Add extra padding to the right
     const finalWidth = Math.max(minWidth, contentWidth);
@@ -736,10 +736,10 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
   // Clone the original frame
   const frameClone = originalFrame.clone();
 
-  // Set the clone to the specified size (968 x 649)
-  const targetWidth = 968;
-  const targetHeight = 649;
-  frameClone.resize(targetWidth, targetHeight);
+  // Keep the original frame's dimensions
+  const targetWidth = originalFrame.width;
+  const targetHeight = originalFrame.height;
+  // No need to resize since clone already has the correct size
 
   // Position the clone
   frameClone.x = padding;
@@ -1179,8 +1179,21 @@ async function addSummaryFontsSection(frame, fonts, startY, padding) {
 
   let currentY = safeStartY + sectionTitle.height + 12;
 
-  // List fonts with complete information
+  // Separate fonts with styles from fonts without styles
+  const fontsWithStyles = [];
+  const fontsWithoutStyles = [];
+
   for (const font of fonts) {
+    const hasStyle = font.hasStyle || font.styleName;
+    if (hasStyle) {
+      fontsWithStyles.push(font);
+    } else {
+      fontsWithoutStyles.push(font);
+    }
+  }
+
+  // Display fonts with styles first (black text)
+  for (const font of fontsWithStyles) {
     const fontText = figma.createText();
     const fontFont = await loadFontSafely({ family: "Inter", style: "Regular" });
     fontText.fontName = fontFont;
@@ -1189,23 +1202,36 @@ async function addSummaryFontsSection(frame, fonts, startY, padding) {
     // Clean display format
     let displayString;
     if (font.fontFamily && font.fontStyle && font.fontSize) {
-      // Use structured data if available
-      displayString = font.hasStyle
-        ? `${font.fontFamily} ${font.fontStyle} ${font.fontSize}px (${font.styleName})`
-        : `${font.fontFamily} ${font.fontStyle} ${font.fontSize}px`;
+      displayString = `${font.fontFamily} ${font.fontStyle} ${font.fontSize}px (${font.styleName})`;
     } else {
-      // Fallback to string format, cleaned up
       displayString = (font.displayString || font.fontString || font).replace(/px.*$/, 'px');
     }
 
     fontText.characters = `• ${displayString}`;
+    fontText.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }]; // Black
+    fontText.x = safePadding + 12;
+    fontText.y = currentY;
+    frame.appendChild(fontText);
+    currentY = currentY + fontText.height + 4;
+  }
 
-    // Red text if no style, black if has style
-    const hasStyle = font.hasStyle || font.styleName;
-    fontText.fills = hasStyle
-      ? [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }] // Black
-      : [{ type: 'SOLID', color: { r: 0.8, g: 0.2, b: 0.2 } }]; // Red
+  // Display fonts without styles at the end (red text)
+  for (const font of fontsWithoutStyles) {
+    const fontText = figma.createText();
+    const fontFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    fontText.fontName = fontFont;
+    fontText.fontSize = 12;
 
+    // Clean display format
+    let displayString;
+    if (font.fontFamily && font.fontStyle && font.fontSize) {
+      displayString = `${font.fontFamily} ${font.fontStyle} ${font.fontSize}px`;
+    } else {
+      displayString = (font.displayString || font.fontString || font).replace(/px.*$/, 'px');
+    }
+
+    fontText.characters = `• ${displayString}`;
+    fontText.fills = [{ type: 'SOLID', color: { r: 0.8, g: 0.2, b: 0.2 } }]; // Red
     fontText.x = safePadding + 12;
     fontText.y = currentY;
     frame.appendChild(fontText);
