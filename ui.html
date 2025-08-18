@@ -222,6 +222,167 @@
       color: #9ca3af;
       margin-top: 16px;
     }
+
+    /* Frame History Styles */
+    .frame-history {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .frame-history h3 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+    }
+
+    .frame-history h3:hover {
+      color: #0d99ff;
+    }
+
+    .collapse-icon {
+      font-size: 12px;
+      transition: transform 0.2s ease;
+    }
+
+    .frame-history.collapsed .collapse-icon {
+      transform: rotate(-90deg);
+    }
+
+    .frame-history.collapsed .frame-content {
+      display: none;
+    }
+
+    .frame-list {
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+
+    /* Responsive adjustments for resizable UI */
+    @media (min-height: 700px) {
+      .frame-list {
+        max-height: 300px; /* More space when window is taller */
+      }
+    }
+
+    @media (min-height: 800px) {
+      .frame-list {
+        max-height: 400px; /* Even more space for very tall windows */
+      }
+    }
+
+    @media (max-width: 300px) {
+      .frame-item {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .frame-actions {
+        margin-left: 0;
+        margin-top: 8px;
+      }
+
+      .bulk-actions {
+        flex-direction: column;
+      }
+    }
+
+    .frame-item {
+      display: flex;
+      align-items: center;
+      padding: 8px;
+      margin-bottom: 4px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .frame-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .frame-name {
+      font-weight: 500;
+      color: #333;
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .frame-details {
+      color: #666;
+      font-size: 11px;
+      margin-top: 2px;
+    }
+
+    .frame-actions {
+      margin-left: 8px;
+    }
+
+    .re-analyze-btn {
+      background: #0d99ff;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .re-analyze-btn:hover {
+      background: #0b7ce6;
+    }
+
+    .bulk-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .bulk-action-btn {
+      flex: 1;
+      background: #f0f0f0;
+      color: #333;
+      border: 1px solid #ddd;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .bulk-action-btn:hover {
+      background: #e0e0e0;
+      border-color: #ccc;
+    }
+
+    .bulk-action-btn.primary {
+      background: #0d99ff;
+      color: white;
+      border-color: #0d99ff;
+    }
+
+    .bulk-action-btn.primary:hover {
+      background: #0b7ce6;
+      border-color: #0b7ce6;
+    }
+
+    .empty-state {
+      text-align: center;
+      color: #666;
+      font-size: 12px;
+      padding: 20px;
+      font-style: italic;
+    }
   </style>
 </head>
 <body>
@@ -274,6 +435,25 @@
 
   <div class="status" id="status"></div>
 
+  <!-- Frame History Section -->
+  <div class="frame-history" id="frame-history">
+    <h3 id="frame-history-toggle">
+      Previously Analyzed Frames
+      <span class="collapse-icon">▼</span>
+    </h3>
+    <div class="frame-content">
+      <div class="frame-list" id="frame-list">
+        <div class="empty-state" id="empty-state">
+          No frames analyzed yet. Analyze a frame to see it listed here.
+        </div>
+      </div>
+      <div class="bulk-actions">
+        <button class="bulk-action-btn primary" id="re-analyze-all-btn" disabled>Re-analyze All</button>
+        <button class="bulk-action-btn" id="clear-list-btn" disabled>Clear List</button>
+      </div>
+    </div>
+  </div>
+
   <div class="version">Frame Analyzer v1.0 - Design Analysis Tool</div>
   
   <script>
@@ -284,6 +464,12 @@
     const progressBar = document.getElementById('progress-bar');
     const progressFill = document.getElementById('progress-fill');
     const progressDetails = document.getElementById('progress-details');
+    const frameList = document.getElementById('frame-list');
+    const emptyState = document.getElementById('empty-state');
+    const reAnalyzeAllBtn = document.getElementById('re-analyze-all-btn');
+    const clearListBtn = document.getElementById('clear-list-btn');
+    const frameHistory = document.getElementById('frame-history');
+    const frameHistoryToggle = document.getElementById('frame-history-toggle');
     
     // Handle analyze button click
     analyzeBtn.addEventListener('click', () => {
@@ -303,6 +489,22 @@
       parent.postMessage({
         pluginMessage: { type: 'cancel' }
       }, '*');
+    });
+
+    // Handle bulk action buttons
+    reAnalyzeAllBtn.addEventListener('click', () => {
+      parent.postMessage({ pluginMessage: { type: 'reAnalyzeAll' } }, '*');
+    });
+
+    clearListBtn.addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear the analyzed frames list?')) {
+        parent.postMessage({ pluginMessage: { type: 'clearFramesList' } }, '*');
+      }
+    });
+
+    // Handle frame history collapse/expand
+    frameHistoryToggle.addEventListener('click', () => {
+      frameHistory.classList.toggle('collapsed');
     });
     
     // Listen for messages from plugin code
@@ -325,8 +527,61 @@
         }
       } else if (msg.type === 'warning') {
         showStatus(msg.message, 'warning');
+      } else if (msg.type === 'framesListUpdated') {
+        updateFramesList(msg.framesList);
       }
     };
+
+    // Frame list management
+    function updateFramesList(framesList) {
+      if (!framesList || framesList.length === 0) {
+        frameList.innerHTML = '<div class="empty-state">No frames analyzed yet. Analyze a frame to see it listed here.</div>';
+        reAnalyzeAllBtn.disabled = true;
+        clearListBtn.disabled = true;
+        return;
+      }
+
+      // Sort frames by last analyzed date (newest first)
+      framesList.sort((a, b) => new Date(b.lastAnalyzed) - new Date(a.lastAnalyzed));
+
+      frameList.innerHTML = framesList.map(frame => {
+        const date = new Date(frame.lastAnalyzed);
+        const timeAgo = getTimeAgo(date);
+
+        return `
+          <div class="frame-item">
+            <div class="frame-info">
+              <div class="frame-name" title="${frame.name}">${frame.name}</div>
+              <div class="frame-details">${frame.elementCount} elements • ${timeAgo}</div>
+            </div>
+            <div class="frame-actions">
+              <button class="re-analyze-btn" onclick="reAnalyzeFrame('${frame.id}')">Re-analyze</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      reAnalyzeAllBtn.disabled = false;
+      clearListBtn.disabled = false;
+    }
+
+    function reAnalyzeFrame(frameId) {
+      parent.postMessage({ pluginMessage: { type: 'reAnalyzeFrame', frameId: frameId } }, '*');
+    }
+
+    function getTimeAgo(date) {
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 7) return `${diffDays}d ago`;
+      return date.toLocaleDateString();
+    }
     
     // Show status message
     function showStatus(message, type) {
@@ -393,6 +648,13 @@
         items[0].remove();
       }
     }
+
+    // Initialize
+    hideProgress();
+    hideStatus();
+
+    // Load frames list on startup
+    parent.postMessage({ pluginMessage: { type: 'getFramesList' } }, '*');
   </script>
 </body>
 </html>

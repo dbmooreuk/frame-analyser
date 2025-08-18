@@ -1,22 +1,118 @@
 // Frame Analyzer Plugin for Figma
 // Analyzes selected frames and extracts components, fonts, and colors
 
-// Show the plugin UI
-figma.showUI(__html__, { width: 320, height: 480 });
+// Show the plugin UI with larger default size for frame history
+figma.showUI(__html__, {
+  width: 360,
+  height: 600
+});
 
 // Handle messages from the UI
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'analyze-frame') {
-    await analyzeSelectedFrame();
+    try {
+      await analyzeSelectedFrameWithTimeout();
+    } catch (error) {
+      console.error('Analysis error:', error);
+      figma.ui.postMessage({
+        type: 'error',
+        message: error.message
+      });
+    }
   } else if (msg.type === 'cancel') {
     figma.closePlugin();
+  } else if (msg.type === 'getFramesList') {
+    // Send current frames list to UI
+    await cleanupAnalyzedFrames(); // Clean up first
+    const framesList = await getAnalyzedFramesList();
+    figma.ui.postMessage({
+      type: 'framesListUpdated',
+      framesList: Object.values(framesList)
+    });
+  } else if (msg.type === 'reAnalyzeFrame') {
+    // Re-analyze a specific frame
+    try {
+      const frame = figma.getNodeById(msg.frameId);
+      if (frame && (frame.type === 'FRAME' || frame.type === 'COMPONENT')) {
+        // Select the frame and analyze it
+        figma.currentPage.selection = [frame];
+        await analyzeSelectedFrame();
+      } else {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'Frame no longer exists or is not accessible.'
+        });
+      }
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to re-analyze frame: ' + error.message
+      });
+    }
+  } else if (msg.type === 'reAnalyzeAll') {
+    // Re-analyze all frames in the list
+    try {
+      const framesList = await getAnalyzedFramesList();
+      const frameIds = Object.keys(framesList);
+      const validFrames = [];
+
+      // Collect valid frames
+      for (const frameId of frameIds) {
+        try {
+          const frame = figma.getNodeById(frameId);
+          if (frame && (frame.type === 'FRAME' || frame.type === 'COMPONENT')) {
+            validFrames.push(frame);
+          }
+        } catch (error) {
+          // Frame no longer exists, will be cleaned up
+        }
+      }
+
+      if (validFrames.length > 0) {
+        // Select all valid frames and analyze them
+        figma.currentPage.selection = validFrames;
+        await analyzeSelectedFrame();
+      } else {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'No valid frames found to re-analyze.'
+        });
+      }
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to re-analyze frames: ' + error.message
+      });
+    }
+  } else if (msg.type === 'clearFramesList') {
+    // Clear the analyzed frames list
+    try {
+      await figma.clientStorage.setAsync('analyzedFrames', {});
+      figma.ui.postMessage({
+        type: 'framesListUpdated',
+        framesList: []
+      });
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to clear frames list: ' + error.message
+      });
+    }
   }
 };
 
 // Main function to analyze the selected frame(s)
 async function analyzeSelectedFrame() {
   try {
+    console.log('Starting analysis...');
+    figma.ui.postMessage({
+      type: 'progress',
+      message: 'Starting analysis...',
+      details: 'Initializing frame analysis'
+    });
+
     const selection = figma.currentPage.selection;
+    console.log('Selection:', selection.length, 'items');
 
     // Validate selection
     const validationResult = validateSelection(selection);
@@ -73,13 +169,39 @@ async function analyzeSelectedFrame() {
       }
 
       // Analyze the frame
+      console.log(`Analyzing frame: ${selectedNode.name}`);
+      figma.ui.postMessage({
+        type: 'progress',
+        message: `Analyzing frame content...`,
+        details: `Processing ${selectedNode.name}`
+      });
+
       const analysisData = await analyzeFrame(selectedNode);
+      console.log('Analysis data:', analysisData);
 
       // Store analysis data for summary
       storeAnalysisData(selectedNode.name, analysisData);
 
       // Create or update the analysis frame
-      const wasUpdated = await createAnalysisFrame(selectedNode, analysisData);
+      console.log('Creating analysis frame...');
+      figma.ui.postMessage({
+        type: 'progress',
+        message: `Creating analysis frame...`,
+        details: `Building visual analysis for ${selectedNode.name}`
+      });
+
+      const analysisFrame = await createAnalysisFrame(selectedNode, analysisData);
+      console.log('Analysis frame created:', analysisFrame ? 'success' : 'failed');
+
+      // Save to analyzed frames list
+      if (analysisFrame) {
+        console.log('Saving to frame history...');
+        await saveAnalyzedFrame(selectedNode.id, {
+          name: selectedNode.name,
+          elementCount: allNodes.length,
+          analysisFrameId: analysisFrame.id
+        });
+      }
 
       figma.ui.postMessage({
         type: 'progress',
@@ -106,9 +228,21 @@ async function analyzeSelectedFrame() {
     console.error('Error in analyzeSelectedFrame:', error);
     figma.ui.postMessage({
       type: 'error',
-      message: `Unexpected error: ${error.message}. Please try again or contact support if the issue persists.`
+      message: `Analysis failed: ${error.message}. Check console for details.`
     });
   }
+}
+
+// Add timeout wrapper for analysis
+async function analyzeSelectedFrameWithTimeout() {
+  const timeoutMs = 60000; // 60 seconds timeout
+
+  return Promise.race([
+    analyzeSelectedFrame(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Analysis timed out after 60 seconds')), timeoutMs)
+    )
+  ]);
 }
 
 // Validate user selection
@@ -786,7 +920,7 @@ async function createAnalysisFrame(originalFrame, analysisData) {
     figma.currentPage.selection = [analysisFrame];
     figma.viewport.scrollAndZoomIntoView([analysisFrame]);
 
-    return wasUpdated;
+    return analysisFrame; // Return the analysis frame for frame history tracking
 
   } catch (error) {
     console.error('Error creating analysis frame:', error);
@@ -934,6 +1068,100 @@ async function createOrUpdateSummaryAnalysis() {
 
 // Store analysis data globally to avoid re-analysis
 const globalAnalysisData = new Map();
+
+// Frame history management (document-based storage - works across computers)
+async function getAnalyzedFramesList() {
+  try {
+    // Try to get from document storage first (works across computers)
+    const docData = figma.root.getPluginData('analyzedFrames');
+    if (docData) {
+      return JSON.parse(docData);
+    }
+
+    // Fallback to client storage for backward compatibility
+    const framesList = await figma.clientStorage.getAsync('analyzedFrames') || {};
+
+    // Migrate to document storage if we have data
+    if (Object.keys(framesList).length > 0) {
+      figma.root.setPluginData('analyzedFrames', JSON.stringify(framesList));
+      console.log('Migrated frame history to document storage');
+    }
+
+    return framesList;
+  } catch (error) {
+    console.warn('Failed to load analyzed frames list:', error);
+    return {};
+  }
+}
+
+async function saveAnalyzedFrame(frameId, frameData) {
+  try {
+    const framesList = await getAnalyzedFramesList();
+    framesList[frameId] = {
+      id: frameId,
+      name: frameData.name,
+      lastAnalyzed: new Date().toISOString(),
+      elementCount: frameData.elementCount,
+      analysisFrameId: frameData.analysisFrameId,
+      exists: true
+    };
+
+    // Save to document storage (works across computers)
+    figma.root.setPluginData('analyzedFrames', JSON.stringify(framesList));
+
+    // Also save to client storage for backward compatibility
+    await figma.clientStorage.setAsync('analyzedFrames', framesList);
+
+    // Send updated list to UI
+    figma.ui.postMessage({
+      type: 'framesListUpdated',
+      framesList: Object.values(framesList)
+    });
+  } catch (error) {
+    console.warn('Failed to save analyzed frame:', error);
+  }
+}
+
+async function cleanupAnalyzedFrames() {
+  try {
+    const framesList = await getAnalyzedFramesList();
+    const updatedFramesList = {};
+    let hasChanges = false;
+
+    // Check if each frame still exists
+    for (const [frameId, frameData] of Object.entries(framesList)) {
+      try {
+        const frame = figma.getNodeById(frameId);
+        if (frame && (frame.type === 'FRAME' || frame.type === 'COMPONENT')) {
+          updatedFramesList[frameId] = Object.assign({}, frameData, { exists: true });
+        } else {
+          hasChanges = true; // Frame no longer exists, remove it
+        }
+      } catch (error) {
+        hasChanges = true; // Frame no longer accessible, remove it
+      }
+    }
+
+    if (hasChanges) {
+      // Save to document storage (works across computers)
+      figma.root.setPluginData('analyzedFrames', JSON.stringify(updatedFramesList));
+
+      // Also save to client storage for backward compatibility
+      await figma.clientStorage.setAsync('analyzedFrames', updatedFramesList);
+
+      // Send updated list to UI
+      figma.ui.postMessage({
+        type: 'framesListUpdated',
+        framesList: Object.values(updatedFramesList)
+      });
+    }
+
+    return updatedFramesList;
+  } catch (error) {
+    console.warn('Failed to cleanup analyzed frames:', error);
+    return {};
+  }
+}
 
 // Font cache to avoid repeated font loading (major performance improvement)
 const fontCache = new Map();
