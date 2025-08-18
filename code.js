@@ -213,8 +213,18 @@ async function analyzeFrame(frame) {
     fontStyle: info.fontStyle,
     fontSize: info.fontSize,
     styleName: info.styleName,
-    displayString: `${info.fontFamily} ${info.fontStyle} ${info.fontSize}px${info.styleName ? ` (${info.styleName})` : ''}`
-  })).sort((a, b) => a.displayString.localeCompare(b.displayString));
+    displayString: `${info.fontFamily} ${info.fontStyle} ${info.fontSize}px`,
+    hasStyle: !!info.styleName
+  })).sort((a, b) => {
+    // Sort by font family, then style, then size
+    const familyCompare = a.fontFamily.localeCompare(b.fontFamily);
+    if (familyCompare !== 0) return familyCompare;
+
+    const styleCompare = a.fontStyle.localeCompare(b.fontStyle);
+    if (styleCompare !== 0) return styleCompare;
+
+    return parseFloat(a.fontSize) - parseFloat(b.fontSize);
+  });
 
   // Convert textStyles Map to array with style and font info
   const textStyleArray = Array.from(textStyles.entries()).map(([styleName, fontInfo]) => ({
@@ -1088,9 +1098,27 @@ async function addSummaryFontsSection(frame, fonts, startY, padding) {
     const fontFont = await loadFontSafely({ family: "Inter", style: "Regular" });
     fontText.fontName = fontFont;
     fontText.fontSize = 12;
-    const displayString = font.displayString || font.fontString || font;
+
+    // Clean display format
+    let displayString;
+    if (font.fontFamily && font.fontStyle && font.fontSize) {
+      // Use structured data if available
+      displayString = font.hasStyle
+        ? `${font.fontFamily} ${font.fontStyle} ${font.fontSize}px (${font.styleName})`
+        : `${font.fontFamily} ${font.fontStyle} ${font.fontSize}px`;
+    } else {
+      // Fallback to string format, cleaned up
+      displayString = (font.displayString || font.fontString || font).replace(/px.*$/, 'px');
+    }
+
     fontText.characters = `• ${displayString}`;
-    fontText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+
+    // Red text if no style, black if has style
+    const hasStyle = font.hasStyle || font.styleName;
+    fontText.fills = hasStyle
+      ? [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }] // Black
+      : [{ type: 'SOLID', color: { r: 0.8, g: 0.2, b: 0.2 } }]; // Red
+
     fontText.x = safePadding + 12;
     fontText.y = currentY;
     frame.appendChild(fontText);
@@ -1321,35 +1349,36 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
     fontsWithStyles.sort((a, b) => a.fontString.localeCompare(b.fontString));
     fontsWithoutStyles.sort((a, b) => a.fontString.localeCompare(b.fontString));
 
-    // Display fonts with text styles first
+    // Display fonts with text styles first (black text)
     for (const fontInfo of fontsWithStyles) {
       const fontText = figma.createText();
       const fontFont = await loadFontSafely({ family: "Inter", style: "Regular" });
       fontText.fontName = fontFont;
       fontText.fontSize = 12;
 
-      // Enhanced display with font family, style, size, and text style name
-      const displayText = fontInfo.fontString.includes('px')
-        ? `${fontInfo.fontString} - ${fontInfo.styleName}`
-        : `${fontInfo.fontString} - ${fontInfo.styleName}`;
+      // Clean format: FontFamily FontWeight FontSize (StyleName)
+      // Extract clean font info from fontString
+      const cleanFontString = fontInfo.fontString.replace(/px.*$/, 'px'); // Remove any extra text after px
+      const displayText = `${cleanFontString} (${fontInfo.styleName})`;
       fontText.characters = `• ${displayText}`;
-      fontText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
+      fontText.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }]; // Black text
       fontText.x = padding + 12;
       fontText.y = currentY;
       frame.appendChild(fontText);
       currentY += fontText.height + 6;
     }
 
-    // Display fonts without text styles at the end
+    // Display fonts without text styles (red text)
     for (const fontInfo of fontsWithoutStyles) {
       const fontText = figma.createText();
       const fontFont = await loadFontSafely({ family: "Inter", style: "Regular" });
       fontText.fontName = fontFont;
       fontText.fontSize = 12;
 
-      // Show enhanced font information even without text styles
-      fontText.characters = `• ${fontInfo.fontString}`;
-      fontText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }]; // Slightly lighter color
+      // Clean format: FontFamily FontWeight FontSize
+      const cleanFontString = fontInfo.fontString.replace(/px.*$/, 'px'); // Remove any extra text after px
+      fontText.characters = `• ${cleanFontString}`;
+      fontText.fills = [{ type: 'SOLID', color: { r: 0.8, g: 0.2, b: 0.2 } }]; // Red text for no style
       fontText.x = padding + 12;
       fontText.y = currentY;
       frame.appendChild(fontText);
