@@ -228,7 +228,7 @@
   <div class="header">
     <div class="title">Frame Analyzer</div>
     <div class="description">
-      Analyze selected frames to extract components, fonts, and colors used in your HMI screen designs.
+      Analyze one or more selected frames to extract components, fonts, and colors used in your HMI screen designs.
     </div>
   </div>
   
@@ -245,8 +245,8 @@
   <div class="instructions">
     <div class="instructions-title">How to use:</div>
     <ol class="instructions-list">
-      <li>Select a single frame on your canvas</li>
-      <li>Click "Analyze Frame" below</li>
+      <li>Select one or more frames on your canvas</li>
+      <li>Click "Analyze Frames" below</li>
       <li>A new frame will be created with the analysis results</li>
       <li>The analysis frame will be positioned next to your selected frame</li>
     </ol>
@@ -265,7 +265,7 @@
   
   <div class="button-group">
     <button class="button" id="cancel-btn">Cancel</button>
-    <button class="button primary" id="analyze-btn">Analyze Frame</button>
+    <button class="button primary" id="analyze-btn">Analyze Frames</button>
   </div>
 
   <div class="progress-bar" id="progress-bar">
@@ -345,7 +345,7 @@
     // Reset analyze button
     function resetAnalyzeButton() {
       analyzeBtn.disabled = false;
-      analyzeBtn.textContent = 'Analyze Frame';
+      analyzeBtn.textContent = 'Analyze Frames';
     }
 
     // Show progress bar

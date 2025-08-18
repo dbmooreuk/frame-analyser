@@ -13,7 +13,7 @@ figma.ui.onmessage = async (msg) => {
   }
 };
 
-// Main function to analyze the selected frame
+// Main function to analyze the selected frame(s)
 async function analyzeSelectedFrame() {
   try {
     const selection = figma.currentPage.selection;
@@ -28,57 +28,78 @@ async function analyzeSelectedFrame() {
       return;
     }
 
-    const selectedNode = selection[0];
+    const selectedFrames = validationResult.frames;
+    const frameCount = selectedFrames.length;
+    const isMultiple = frameCount > 1;
 
-    // Check if frame has content
-    if (selectedNode.children.length === 0) {
+    figma.ui.postMessage({
+      type: 'progress',
+      message: `Analyzing ${frameCount} frame${isMultiple ? 's' : ''}...`,
+      details: `Starting analysis of ${frameCount} frame${isMultiple ? 's' : ''}`
+    });
+
+    // Analyze each frame
+    for (let i = 0; i < selectedFrames.length; i++) {
+      const selectedNode = selectedFrames[i];
+      const frameNumber = i + 1;
+
       figma.ui.postMessage({
-        type: 'error',
-        message: 'The selected frame appears to be empty. Please select a frame with content to analyze.'
+        type: 'progress',
+        message: `Analyzing frame ${frameNumber}/${frameCount}...`,
+        details: `Analyzing frame: ${selectedNode.name} (${frameNumber}/${frameCount})`
       });
-      return;
-    }
 
-    // Check if frame is too large (performance consideration)
-    const allNodes = selectedNode.findAll();
-    if (allNodes.length > 1000) {
-      const proceed = await showLargeFrameWarning(allNodes.length);
-      if (!proceed) {
+      // Check if frame has content
+      if (selectedNode.children.length === 0) {
         figma.ui.postMessage({
-          type: 'error',
-          message: 'Analysis cancelled by user.'
+          type: 'progress',
+          message: `Skipping empty frame ${frameNumber}/${frameCount}`,
+          details: `Frame "${selectedNode.name}" is empty - skipping`
         });
-        return;
+        continue;
       }
+
+      // Check if frame is too large (performance consideration)
+      const allNodes = selectedNode.findAll();
+      if (allNodes.length > 1000) {
+        const proceed = await showLargeFrameWarning(allNodes.length);
+        if (!proceed) {
+          figma.ui.postMessage({
+            type: 'error',
+            message: 'Analysis cancelled by user.'
+          });
+          return;
+        }
+      }
+
+      // Analyze the frame
+      const analysisData = await analyzeFrame(selectedNode);
+
+      // Store analysis data for summary
+      storeAnalysisData(selectedNode.name, analysisData);
+
+      // Create or update the analysis frame
+      const wasUpdated = await createAnalysisFrame(selectedNode, analysisData);
+
+      figma.ui.postMessage({
+        type: 'progress',
+        message: `Completed frame ${frameNumber}/${frameCount}`,
+        details: `${selectedNode.name}: ${analysisData.components.length} components, ${analysisData.fonts.length} fonts, ${analysisData.colors.length} colors`
+      });
     }
-
-    figma.ui.postMessage({
-      type: 'progress',
-      message: 'Starting analysis...'
-    });
-
-    // Analyze the frame
-    const analysisData = await analyzeFrame(selectedNode);
-
-    figma.ui.postMessage({
-      type: 'progress',
-      message: 'Creating analysis frame...',
-      details: `Starting analysis of frame: ${selectedNode.name}`
-    });
-
-    // Store analysis data for summary
-    storeAnalysisData(selectedNode.name, analysisData);
-
-    // Create or update the analysis frame
-    const wasUpdated = await createAnalysisFrame(selectedNode, analysisData);
-    const actionText = wasUpdated ? 'updated' : 'completed';
 
     // Create or update the summary analysis
+    figma.ui.postMessage({
+      type: 'progress',
+      message: 'Creating summary...',
+      details: 'Aggregating data from all analyzed frames'
+    });
+
     await createOrUpdateSummaryAnalysis();
 
     figma.ui.postMessage({
       type: 'success',
-      message: `Analysis ${actionText}! Found ${analysisData.components.length} components, ${analysisData.fonts.length} fonts, and ${analysisData.colors.length} colors.`
+      message: `Analysis complete! Analyzed ${frameCount} frame${isMultiple ? 's' : ''} and created summary.`
     });
 
   } catch (error) {
@@ -95,28 +116,34 @@ function validateSelection(selection) {
   if (selection.length === 0) {
     return {
       isValid: false,
-      message: 'Please select a frame to analyze. Click on a frame in your design and try again.'
+      message: 'Please select one or more frames to analyze. Click on frames in your design and try again.'
     };
   }
 
-  if (selection.length > 1) {
+  // Filter selection to only include frames
+  const frameNodes = selection.filter(node => node.type === 'FRAME');
+
+  if (frameNodes.length === 0) {
+    const nodeTypes = [...new Set(selection.map(node => node.type.toLowerCase().replace('_', ' ')))];
     return {
       isValid: false,
-      message: 'Please select only one frame at a time. Multiple frame analysis is not currently supported.'
+      message: `Selected elements are ${nodeTypes.join(', ')}, not frames. Please select one or more frames to analyze.`
     };
   }
 
-  const selectedNode = selection[0];
-
-  if (selectedNode.type !== 'FRAME') {
-    const nodeType = selectedNode.type.toLowerCase().replace('_', ' ');
+  // Check if some nodes are not frames (mixed selection)
+  if (frameNodes.length < selection.length) {
+    const nonFrameCount = selection.length - frameNodes.length;
     return {
       isValid: false,
-      message: `Selected element is a ${nodeType}, not a frame. Please select a frame to analyze.`
+      message: `Selection includes ${nonFrameCount} non-frame element(s). Please select only frames for analysis.`
     };
   }
 
-  return { isValid: true };
+  return {
+    isValid: true,
+    frames: frameNodes
+  };
 }
 
 // Show warning for large frames
@@ -750,6 +777,11 @@ function storeAnalysisData(frameName, analysisData) {
   console.log(`Components: ${analysisData.components ? analysisData.components.length : 0}`);
   console.log(`Fonts: ${analysisData.fonts ? analysisData.fonts.length : 0}`);
   console.log(`Colors: ${analysisData.colors ? analysisData.colors.length : 0}`);
+
+  // Debug: Show actual color data structure
+  if (analysisData.colors && analysisData.colors.length > 0) {
+    console.log('Color data structure:', analysisData.colors.slice(0, 3)); // Show first 3 colors
+  }
 }
 
 // Collect aggregated data from stored analysis data
@@ -816,11 +848,15 @@ async function collectSummaryData() {
 
     // Aggregate colors (unique by hex value)
     if (analysisData.colors) {
-      analysisData.colors.forEach(color => {
+      console.log(`  Processing ${analysisData.colors.length} colors from ${frameName}`);
+      analysisData.colors.forEach((color, index) => {
+        console.log(`    Color ${index + 1}:`, color);
         const colorKey = color.hex || color;
         if (!aggregatedColors.has(colorKey)) {
           aggregatedColors.set(colorKey, color);
           console.log(`  Added color: ${colorKey}`);
+        } else {
+          console.log(`  Color ${colorKey} already exists, skipping`);
         }
       });
     }
@@ -837,6 +873,7 @@ async function collectSummaryData() {
   };
 
   console.log(`Summary result: ${result.totalComponents} components, ${result.totalFonts} fonts, ${result.totalColors} colors`);
+  console.log('Summary colors:', result.colors.map(c => c.hex || c).join(', '));
 
   return result;
 }
