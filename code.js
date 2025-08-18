@@ -1301,32 +1301,44 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
   // Create a combined list of fonts with their associated styles
   const allFonts = new Map();
 
-  // Add text styles with their font information
+  // Add text styles with their font information (these have style names)
   if (textStyles.length > 0) {
     for (const textStyle of textStyles) {
-      const fontKey = `${textStyle.fontFamily} - ${textStyle.fontStyle}`;
-      if (!allFonts.has(fontKey)) {
-        allFonts.set(fontKey, {
-          fontString: fontKey,
-          styleName: textStyle.styleName,
-          fontSize: textStyle.fontSize
-        });
-      }
+      // Use the same format as direct fonts for proper deduplication
+      const fontKey = `${textStyle.fontFamily} ${textStyle.fontStyle} ${textStyle.fontSize}px`;
+      allFonts.set(fontKey, {
+        fontString: fontKey,
+        styleName: textStyle.styleName,
+        fontSize: textStyle.fontSize,
+        fontFamily: textStyle.fontFamily,
+        fontStyle: textStyle.fontStyle,
+        hasCompleteInfo: true
+      });
     }
   }
 
-  // Add any fonts that don't have text styles
+  // Add fonts from direct analysis (these have complete info including size)
   if (fonts.length > 0) {
     for (const font of fonts) {
-      const fontKey = font.fontKey || font.fontString || font; // Handle new and old formats
+      // Create a proper font key based on family, style, and size
+      const fontKey = `${font.fontFamily} ${font.fontStyle} ${font.fontSize}px`;
+
+      // Only add if we don't already have this exact font, or if this one has more complete info
       if (!allFonts.has(fontKey)) {
         allFonts.set(fontKey, {
-          fontString: font.displayString || font.fontString || fontKey,
+          fontString: `${font.fontFamily} ${font.fontStyle} ${font.fontSize}px`,
           styleName: font.styleName || null,
-          fontSize: font.fontSize || null,
-          fontFamily: font.fontFamily || null,
-          fontStyle: font.fontStyle || null
+          fontSize: font.fontSize,
+          fontFamily: font.fontFamily,
+          fontStyle: font.fontStyle,
+          hasCompleteInfo: true
         });
+      } else {
+        // If we already have this font, update it with style name if this one has it
+        const existing = allFonts.get(fontKey);
+        if (font.styleName && !existing.styleName) {
+          existing.styleName = font.styleName;
+        }
       }
     }
   }
