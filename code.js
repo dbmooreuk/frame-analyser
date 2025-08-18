@@ -84,7 +84,7 @@ async function analyzeSelectedFrame() {
       figma.ui.postMessage({
         type: 'progress',
         message: `Completed frame ${frameNumber}/${frameCount}`,
-        details: `${selectedNode.name}: ${analysisData.components.length} components, ${analysisData.fonts.length} fonts, ${analysisData.colors.length} colors`
+        details: `${selectedNode.name}: ${analysisData.components.length} components, ${analysisData.icons ? analysisData.icons.length : 0} icons, ${analysisData.fonts.length} fonts, ${analysisData.colors.length} colors`
       });
     }
 
@@ -161,6 +161,7 @@ async function showLargeFrameWarning(elementCount) {
 // Analyze a frame and extract components, fonts, and colors
 async function analyzeFrame(frame) {
   const components = new Map(); // Use Map to store unique components with details
+  const icons = new Map(); // Separate map for icons
   const fonts = new Map(); // Change to Map to store font with associated style
   const colors = new Map(); // Change to Map to store color with associated style
   const colorStyles = new Set();
@@ -185,7 +186,7 @@ async function analyzeFrame(frame) {
     const node = allNodes[i];
 
     try {
-      await analyzeNode(node, components, fonts, colors, colorStyles, textStyles, effectStyles);
+      await analyzeNode(node, components, icons, fonts, colors, colorStyles, textStyles, effectStyles);
     } catch (error) {
       // Silently handle node processing errors
     }
@@ -238,6 +239,7 @@ async function analyzeFrame(frame) {
 
   return {
     components: Array.from(components.values()),
+    icons: Array.from(icons.values()),
     fonts: fontArray,
     colors: colorArray,
     colorStyles: Array.from(colorStyles).sort(),
@@ -252,8 +254,23 @@ async function analyzeFrame(frame) {
   };
 }
 
+// Helper function to determine if a component is an icon
+function isComponentAnIcon(mainComponent, instanceNode) {
+  const componentName = mainComponent.name;
+  const masterName = (mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET')
+    ? mainComponent.parent.name
+    : componentName;
+
+  // Simple rule: Icons start with lowercase, Components start with uppercase
+  const componentStartsWithLowercase = /^[a-z]/.test(componentName);
+  const masterStartsWithLowercase = /^[a-z]/.test(masterName);
+
+  // An icon is any component that starts with a lowercase letter
+  return componentStartsWithLowercase || masterStartsWithLowercase;
+}
+
 // Analyze a single node for components, fonts, colors, and styles
-async function analyzeNode(node, components, fonts, colors, colorStyles, textStyles, effectStyles) {
+async function analyzeNode(node, components, icons, fonts, colors, colorStyles, textStyles, effectStyles) {
   try {
     // Extract components
     if (node.type === 'INSTANCE') {
@@ -268,21 +285,26 @@ async function analyzeNode(node, components, fonts, colors, colorStyles, textSty
           // Create a unique key for this specific variant
           const variantKey = mainComponent.key || mainComponent.id;
 
-          if (!components.has(variantKey)) {
+          // Determine if this is an icon based on naming patterns and size
+          const isIcon = isComponentAnIcon(mainComponent, node);
+          const targetMap = isIcon ? icons : components;
+
+          if (!targetMap.has(variantKey)) {
             // Determine if this is a variant or standalone component
             const isVariant = mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET';
 
-            components.set(variantKey, {
+            targetMap.set(variantKey, {
               masterName: isVariant ? masterComponent.name : mainComponent.name,
               variantName: isVariant ? mainComponent.name : null,
               fullName: mainComponent.name,
               key: mainComponent.key,
               id: mainComponent.id,
               isVariant: isVariant,
-              instanceCount: 1
+              instanceCount: 1,
+              isIcon: isIcon
             });
           } else {
-            components.get(variantKey).instanceCount++;
+            targetMap.get(variantKey).instanceCount++;
           }
         }
       } catch (error) {
@@ -587,6 +609,16 @@ async function createAnalysisFrame(originalFrame, analysisData) {
     currentY = await addComponentSection(analysisFrame, "Components Used", analysisData.components, currentY, padding);
   }
 
+  // Add icons section
+  if (analysisData.icons && analysisData.icons.length > 0) {
+    figma.ui.postMessage({
+      type: 'progress',
+      message: 'Building analysis frame...',
+      details: `Adding ${analysisData.icons.length} icons`
+    });
+    currentY = await addComponentSection(analysisFrame, "Icons Used", analysisData.icons, currentY, padding);
+  }
+
   // Add combined fonts and text styles section
   if (analysisData.fonts.length > 0 || analysisData.textStyles.length > 0) {
     currentY = await addCombinedFontSection(analysisFrame, "Fonts & Text Styles", analysisData.fonts, analysisData.textStyles, currentY, padding);
@@ -800,6 +832,7 @@ async function collectSummaryData() {
   const analysisFrames = allFrames.filter(frame => frame.name.startsWith('Analysis: '));
 
   const aggregatedComponents = new Map();
+  const aggregatedIcons = new Map();
   const aggregatedFonts = new Map();
   const aggregatedColors = new Map();
   const frameCount = analysisFrames.length;
@@ -845,6 +878,17 @@ async function collectSummaryData() {
       });
     }
 
+    // Aggregate icons (unique by master name + variant name)
+    if (analysisData.icons) {
+      analysisData.icons.forEach(icon => {
+        const key = icon.isVariant ? `${icon.masterName}:${icon.variantName}` : icon.masterName;
+        if (!aggregatedIcons.has(key)) {
+          aggregatedIcons.set(key, icon);
+          console.log(`  Added icon: ${key}`);
+        }
+      });
+    }
+
     // Aggregate fonts (unique by font key which includes size)
     if (analysisData.fonts) {
       analysisData.fonts.forEach(font => {
@@ -875,14 +919,16 @@ async function collectSummaryData() {
   const result = {
     frameCount: frameCount,
     totalComponents: aggregatedComponents.size,
+    totalIcons: aggregatedIcons.size,
     totalFonts: aggregatedFonts.size,
     totalColors: aggregatedColors.size,
     components: Array.from(aggregatedComponents.values()),
+    icons: Array.from(aggregatedIcons.values()),
     fonts: Array.from(aggregatedFonts.values()),
     colors: Array.from(aggregatedColors.values())
   };
 
-  console.log(`Summary result: ${result.totalComponents} components, ${result.totalFonts} fonts, ${result.totalColors} colors`);
+  console.log(`Summary result: ${result.totalComponents} components, ${result.totalIcons} icons, ${result.totalFonts} fonts, ${result.totalColors} colors`);
   console.log('Summary colors:', result.colors.map(c => c.hex || c).join(', '));
 
   return result;
@@ -937,6 +983,11 @@ async function populateSummaryContent(summaryFrame, summaryData) {
   // Components section
   if (summaryData.totalComponents > 0) {
     currentY = await addSummaryComponentsSection(summaryFrame, summaryData.components, currentY, padding);
+  }
+
+  // Icons section
+  if (summaryData.totalIcons > 0) {
+    currentY = await addSummaryIconsSection(summaryFrame, summaryData.icons, currentY, padding);
   }
 
   // Fonts section
@@ -1069,6 +1120,42 @@ async function addSummaryComponentsSection(frame, components, startY, padding) {
     compText.y = currentY;
     frame.appendChild(compText);
     currentY = currentY + compText.height + 4;
+  }
+
+  return currentY + 20;
+}
+
+// Add summary icons section
+async function addSummaryIconsSection(frame, icons, startY, padding) {
+  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
+  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+
+  // Section title
+  const sectionTitle = figma.createText();
+  const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
+  sectionTitle.fontName = titleFont;
+  sectionTitle.fontSize = 16;
+  sectionTitle.characters = `Icons Used (${icons.length})`;
+  sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+  sectionTitle.x = safePadding;
+  sectionTitle.y = safeStartY;
+  frame.appendChild(sectionTitle);
+
+  let currentY = safeStartY + sectionTitle.height + 12;
+
+  // List icons
+  for (const icon of icons) {
+    const iconText = figma.createText();
+    const iconFont = await loadFontSafely({ family: "Inter", style: "Regular" });
+    iconText.fontName = iconFont;
+    iconText.fontSize = 12;
+    const displayName = icon.isVariant ? `${icon.masterName} (${icon.variantName})` : icon.masterName;
+    iconText.characters = `• ${displayName}`;
+    iconText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+    iconText.x = safePadding + 12;
+    iconText.y = currentY;
+    frame.appendChild(iconText);
+    currentY = currentY + iconText.height + 4;
   }
 
   return currentY + 20;
