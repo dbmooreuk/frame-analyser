@@ -10,15 +10,7 @@ figma.showUI(__html__, {
 // Handle messages from the UI
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'analyze-frame') {
-    try {
-      await analyzeSelectedFrameWithTimeout();
-    } catch (error) {
-      console.error('Analysis error:', error);
-      figma.ui.postMessage({
-        type: 'error',
-        message: error.message
-      });
-    }
+    await analyzeSelectedFrame();
   } else if (msg.type === 'cancel') {
     figma.closePlugin();
   } else if (msg.type === 'getFramesList') {
@@ -35,6 +27,7 @@ figma.ui.onmessage = async (msg) => {
       const frame = figma.getNodeById(msg.frameId);
       if (frame && (frame.type === 'FRAME' || frame.type === 'COMPONENT')) {
         // Select the frame and analyze it
+        console.log(`Re-analyzing frame: ${frame.name}`);
         figma.currentPage.selection = [frame];
         await analyzeSelectedFrame();
       } else {
@@ -44,6 +37,7 @@ figma.ui.onmessage = async (msg) => {
         });
       }
     } catch (error) {
+      console.log(`Could not re-analyze frame: ${msg.frameId}`, error);
       figma.ui.postMessage({
         type: 'error',
         message: 'Failed to re-analyze frame: ' + error.message
@@ -70,6 +64,7 @@ figma.ui.onmessage = async (msg) => {
 
       if (validFrames.length > 0) {
         // Select all valid frames and analyze them
+        console.log(`Re-analyzing ${validFrames.length} frames`);
         figma.currentPage.selection = validFrames;
         await analyzeSelectedFrame();
       } else {
@@ -79,6 +74,7 @@ figma.ui.onmessage = async (msg) => {
         });
       }
     } catch (error) {
+      console.log('Bulk re-analysis error:', error);
       figma.ui.postMessage({
         type: 'error',
         message: 'Failed to re-analyze frames: ' + error.message
@@ -157,15 +153,16 @@ async function analyzeSelectedFrame() {
 
       // Check if frame is too large (performance consideration)
       const allNodes = selectedNode.findAll();
-      if (allNodes.length > 1000) {
-        const proceed = await showLargeFrameWarning(allNodes.length);
-        if (!proceed) {
-          figma.ui.postMessage({
-            type: 'error',
-            message: 'Analysis cancelled by user.'
-          });
-          return;
-        }
+      if (allNodes.length > 800) {
+        // Calculate estimated time
+        const estimatedSeconds = Math.ceil(allNodes.length / 50); // ~50 elements per second
+        figma.ui.postMessage({
+          type: 'warning',
+          message: `Large frame detected: ${allNodes.length} elements. Estimated time: ${estimatedSeconds}s. Consider analyzing smaller sections for better performance.`
+        });
+
+        // Continue anyway but warn user
+        console.log(`Processing large frame: ${selectedNode.name} with ${allNodes.length} elements`);
       }
 
       // Analyze the frame
@@ -233,17 +230,7 @@ async function analyzeSelectedFrame() {
   }
 }
 
-// Add timeout wrapper for analysis
-async function analyzeSelectedFrameWithTimeout() {
-  const timeoutMs = 60000; // 60 seconds timeout
-
-  return Promise.race([
-    analyzeSelectedFrame(),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Analysis timed out after 60 seconds')), timeoutMs)
-    )
-  ]);
-}
+// Removed timeout system - analysis runs without time limits
 
 // Validate user selection
 function validateSelection(selection) {
@@ -280,16 +267,10 @@ function validateSelection(selection) {
   };
 }
 
-// Show warning for large frames
-async function showLargeFrameWarning(elementCount) {
-  figma.ui.postMessage({
-    type: 'warning',
-    message: `This frame contains ${elementCount} elements. Analysis may take longer than usual. Continue?`
-  });
-
-  // For now, we'll proceed automatically. In a full implementation,
-  // you might want to add a confirmation dialog
-  return true;
+// Helper function to estimate analysis time
+function estimateAnalysisTime(elementCount) {
+  // Rough estimate: ~50 elements per second
+  return Math.ceil(elementCount / 50);
 }
 
 // Analyze a frame and extract components, fonts, and colors
