@@ -414,17 +414,19 @@ async function analyzeFrame(frame) {
     }
   }
 
-  // Convert colors Map to array with hex, opacity, and style info
+  // Convert colors Map to array with hex, RGB565, opacity, and style info
   const colorArray = Array.from(colors.entries()).map(([, info]) => ({
     hex: info.hex,
+    rgb565: hexToRgb565(info.hex),
     opacity: info.opacity,
     displayHex: info.opacity < 1 ? `${info.hex} (${Math.round(info.opacity * 100)}%)` : info.hex,
     styleName: info.styleName,
     type: info.type
   })).sort((a, b) => a.hex.localeCompare(b.hex));
 
-  // Log colors with opacity for debugging
+  // Log colors with opacity and RGB565 for debugging
   console.log('Colors with opacity:', colorArray.filter(c => c.opacity < 1).map(c => c.displayHex));
+  console.log('Sample RGB565 conversions:', colorArray.slice(0, 3).map(c => `${c.hex} -> ${c.rgb565}`));
 
   // Convert fonts Map to array with complete font info
   const fontArray = Array.from(fonts.entries()).map(([fontKey, info]) => ({
@@ -1836,13 +1838,14 @@ async function addSummaryColorsSection(frame, colors, startY, padding) {
     swatch.strokeWeight = 1;
     frame.appendChild(swatch);
 
-    // Color text
+    // Color text with hex and RGB565
     const colorText = figma.createText();
     const colorFont = await loadFontSafely({ family: "Inter", style: "Regular" });
     colorText.fontName = colorFont;
     colorText.fontSize = 12;
     const styleName = color.styleName ? ` (${color.styleName})` : '';
-    colorText.characters = `${displayText}${styleName}`;
+    const rgb565 = color.rgb565 || hexToRgb565(colorHex);
+    colorText.characters = `${displayText} | ${rgb565}${styleName}`;
     colorText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
     colorText.x = safePadding + 36;
     colorText.y = currentY;
@@ -2100,13 +2103,14 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
     for (const colorInfo of colors) {
       const hex = colorInfo.hex || colorInfo; // Handle both old and new format
       const displayHex = colorInfo.displayHex || hex; // Use displayHex if available (includes opacity)
+      const rgb565 = colorInfo.rgb565 || hexToRgb565(hex); // Calculate RGB565 if not available
       const styleName = colorInfo.styleName;
       const opacity = colorInfo.opacity;
 
       if (styleName) {
-        colorsWithStyles.push({ hex, displayHex, styleName, opacity });
+        colorsWithStyles.push({ hex, displayHex, rgb565, styleName, opacity });
       } else {
-        colorsWithoutStyles.push({ hex, displayHex, styleName: null, opacity });
+        colorsWithoutStyles.push({ hex, displayHex, rgb565, styleName: null, opacity });
       }
     }
 
@@ -2135,13 +2139,14 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
       swatch.cornerRadius = 3;
       frame.appendChild(swatch);
 
-      // Color text with hex (including opacity) and style name
+      // Color text with hex, RGB565, and style name
       const colorText = figma.createText();
       const colorFont = await loadFontSafely({ family: "Inter", style: "Regular" });
       colorText.fontName = colorFont;
       colorText.fontSize = 12;
 
-      const displayText = `${colorInfo.displayHex} - ${colorInfo.styleName}`;
+      const rgb565 = colorInfo.rgb565 || hexToRgb565(colorInfo.hex);
+      const displayText = `${colorInfo.displayHex} | ${rgb565} - ${colorInfo.styleName}`;
       colorText.characters = displayText;
       colorText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
       colorText.x = padding + 40;
@@ -2172,13 +2177,14 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
       swatch.cornerRadius = 3;
       frame.appendChild(swatch);
 
-      // Color text with hex value (including opacity)
+      // Color text with hex and RGB565 values (including opacity)
       const colorText = figma.createText();
       const colorFont = await loadFontSafely({ family: "Inter", style: "Regular" });
       colorText.fontName = colorFont;
       colorText.fontSize = 12;
 
-      colorText.characters = colorInfo.displayHex;
+      const rgb565 = colorInfo.rgb565 || hexToRgb565(colorInfo.hex);
+      colorText.characters = `${colorInfo.displayHex} | ${rgb565}`;
       colorText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }]; // Slightly lighter color
       colorText.x = padding + 40;
       colorText.y = currentY + 2;
@@ -2289,6 +2295,29 @@ function hexToRgb(hex) {
     g: parseInt(result[2], 16) / 255,
     b: parseInt(result[3], 16) / 255
   } : { r: 0, g: 0, b: 0 };
+}
+
+// Convert hex to RGB565 format (commonly used in embedded displays)
+function hexToRgb565(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!result) return '0x0000';
+
+  // Convert hex to 8-bit RGB values
+  const r8 = parseInt(result[1], 16);
+  const g8 = parseInt(result[2], 16);
+  const b8 = parseInt(result[3], 16);
+
+  // Convert to RGB565 format
+  // Red: 5 bits (0-31), Green: 6 bits (0-63), Blue: 5 bits (0-31)
+  const r5 = Math.round(r8 * 31 / 255);
+  const g6 = Math.round(g8 * 63 / 255);
+  const b5 = Math.round(b8 * 31 / 255);
+
+  // Combine into 16-bit value: RRRRRGGGGGBBBBBB
+  const rgb565 = (r5 << 11) | (g6 << 5) | b5;
+
+  // Return as hex string (4 digits)
+  return '0x' + rgb565.toString(16).toUpperCase().padStart(4, '0');
 }
 
 // Plugin is ready - waiting for user interaction
