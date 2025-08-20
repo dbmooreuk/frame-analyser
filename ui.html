@@ -493,6 +493,10 @@
 
     // Handle bulk action buttons
     reAnalyzeAllBtn.addEventListener('click', () => {
+      // Update button state immediately on click
+      reAnalyzeAllBtn.textContent = 'Analyzing...';
+      reAnalyzeAllBtn.disabled = true;
+
       parent.postMessage({ pluginMessage: { type: 'reAnalyzeAll' } }, '*');
     });
 
@@ -515,6 +519,13 @@
         showStatus(msg.message, 'success');
         resetAnalyzeButton();
         hideProgress();
+
+        // Auto-dismiss success message if specified
+        if (msg.autoDismiss && msg.dismissAfter) {
+          setTimeout(() => {
+            hideStatus();
+          }, msg.dismissAfter);
+        }
       } else if (msg.type === 'error') {
         showStatus(msg.message, 'error');
         resetAnalyzeButton();
@@ -529,6 +540,8 @@
         showStatus(msg.message, 'warning');
       } else if (msg.type === 'framesListUpdated') {
         updateFramesList(msg.framesList);
+      } else if (msg.type === 'updateButtonState') {
+        updateButtonState(msg);
       }
     };
 
@@ -566,6 +579,13 @@
     }
 
     function reAnalyzeFrame(frameId) {
+      // Update button state immediately on click
+      const button = document.querySelector(`[onclick="reAnalyzeFrame('${frameId}')"]`);
+      if (button) {
+        button.textContent = 'Analyzing...';
+        button.disabled = true;
+      }
+
       parent.postMessage({ pluginMessage: { type: 'reAnalyzeFrame', frameId: frameId } }, '*');
     }
 
@@ -581,6 +601,44 @@
       if (diffHours < 24) return `${diffHours}h ago`;
       if (diffDays < 7) return `${diffDays}d ago`;
       return date.toLocaleDateString();
+    }
+
+    // Handle button state updates from plugin
+    function updateButtonState(msg) {
+      if (msg.frameId) {
+        // Update specific frame re-analyze button
+        const button = document.querySelector(`[onclick="reAnalyzeFrame('${msg.frameId}')"]`);
+        if (button) {
+          if (msg.state === 'analyzing') {
+            button.textContent = 'Analyzing...';
+            button.disabled = true;
+          } else {
+            // Reset to normal state (complete or error)
+            button.textContent = 'Re-analyze';
+            button.disabled = false;
+          }
+        }
+      } else if (msg.buttonType === 'analyze') {
+        // Update main analyze button
+        if (msg.state === 'analyzing') {
+          analyzeBtn.textContent = 'Analyzing...';
+          analyzeBtn.disabled = true;
+        } else {
+          // Reset to normal state (complete or error)
+          analyzeBtn.textContent = 'Analyze Frames';
+          analyzeBtn.disabled = false;
+        }
+      } else if (msg.buttonType === 'reAnalyzeAll') {
+        // Update re-analyze all button
+        if (msg.state === 'analyzing') {
+          reAnalyzeAllBtn.textContent = 'Analyzing...';
+          reAnalyzeAllBtn.disabled = true;
+        } else {
+          // Reset to normal state (complete or error)
+          reAnalyzeAllBtn.textContent = 'Re-analyze All';
+          reAnalyzeAllBtn.disabled = false;
+        }
+      }
     }
     
     // Show status message

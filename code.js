@@ -10,7 +10,31 @@ figma.showUI(__html__, {
 // Handle messages from the UI
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'analyze-frame') {
-    await analyzeSelectedFrame();
+    try {
+      // Update button state to show analyzing
+      figma.ui.postMessage({
+        type: 'updateButtonState',
+        buttonType: 'analyze',
+        state: 'analyzing'
+      });
+
+      await analyzeSelectedFrame();
+
+      // Reset button state after completion
+      figma.ui.postMessage({
+        type: 'updateButtonState',
+        buttonType: 'analyze',
+        state: 'complete'
+      });
+    } catch (error) {
+      // Reset button state on error
+      figma.ui.postMessage({
+        type: 'updateButtonState',
+        buttonType: 'analyze',
+        state: 'error'
+      });
+      throw error; // Re-throw to maintain existing error handling
+    }
   } else if (msg.type === 'cancel') {
     figma.closePlugin();
   } else if (msg.type === 'getFramesList') {
@@ -24,13 +48,34 @@ figma.ui.onmessage = async (msg) => {
   } else if (msg.type === 'reAnalyzeFrame') {
     // Re-analyze a specific frame
     try {
+      // Update button state to show analyzing
+      figma.ui.postMessage({
+        type: 'updateButtonState',
+        frameId: msg.frameId,
+        state: 'analyzing'
+      });
+
       const frame = figma.getNodeById(msg.frameId);
       if (frame && (frame.type === 'FRAME' || frame.type === 'COMPONENT')) {
         // Select the frame and analyze it
         console.log(`Re-analyzing frame: ${frame.name}`);
         figma.currentPage.selection = [frame];
         await analyzeSelectedFrame();
+
+        // Reset button state after completion
+        figma.ui.postMessage({
+          type: 'updateButtonState',
+          frameId: msg.frameId,
+          state: 'complete'
+        });
       } else {
+        // Reset button state on error
+        figma.ui.postMessage({
+          type: 'updateButtonState',
+          frameId: msg.frameId,
+          state: 'error'
+        });
+
         figma.ui.postMessage({
           type: 'error',
           message: 'Frame no longer exists or is not accessible.'
@@ -38,6 +83,14 @@ figma.ui.onmessage = async (msg) => {
       }
     } catch (error) {
       console.log(`Could not re-analyze frame: ${msg.frameId}`, error);
+
+      // Reset button state on error
+      figma.ui.postMessage({
+        type: 'updateButtonState',
+        frameId: msg.frameId,
+        state: 'error'
+      });
+
       figma.ui.postMessage({
         type: 'error',
         message: 'Failed to re-analyze frame: ' + error.message
@@ -46,6 +99,13 @@ figma.ui.onmessage = async (msg) => {
   } else if (msg.type === 'reAnalyzeAll') {
     // Re-analyze all frames in the list
     try {
+      // Update button state to show analyzing
+      figma.ui.postMessage({
+        type: 'updateButtonState',
+        buttonType: 'reAnalyzeAll',
+        state: 'analyzing'
+      });
+
       const framesList = await getAnalyzedFramesList();
       const frameIds = Object.keys(framesList);
       const validFrames = [];
@@ -67,7 +127,21 @@ figma.ui.onmessage = async (msg) => {
         console.log(`Re-analyzing ${validFrames.length} frames`);
         figma.currentPage.selection = validFrames;
         await analyzeSelectedFrame();
+
+        // Reset button state after completion
+        figma.ui.postMessage({
+          type: 'updateButtonState',
+          buttonType: 'reAnalyzeAll',
+          state: 'complete'
+        });
       } else {
+        // Reset button state on error
+        figma.ui.postMessage({
+          type: 'updateButtonState',
+          buttonType: 'reAnalyzeAll',
+          state: 'error'
+        });
+
         figma.ui.postMessage({
           type: 'error',
           message: 'No valid frames found to re-analyze.'
@@ -75,6 +149,14 @@ figma.ui.onmessage = async (msg) => {
       }
     } catch (error) {
       console.log('Bulk re-analysis error:', error);
+
+      // Reset button state on error
+      figma.ui.postMessage({
+        type: 'updateButtonState',
+        buttonType: 'reAnalyzeAll',
+        state: 'error'
+      });
+
       figma.ui.postMessage({
         type: 'error',
         message: 'Failed to re-analyze frames: ' + error.message
@@ -218,7 +300,9 @@ async function analyzeSelectedFrame() {
 
     figma.ui.postMessage({
       type: 'success',
-      message: `Analysis complete! Analyzed ${frameCount} frame${isMultiple ? 's' : ''} and created summary.`
+      message: `Analysis complete! Analyzed ${frameCount} frame${isMultiple ? 's' : ''} and created summary.`,
+      autoDismiss: true,
+      dismissAfter: 4000 // 4 seconds
     });
 
   } catch (error) {
