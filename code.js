@@ -275,6 +275,9 @@ function estimateAnalysisTime(elementCount) {
 
 // Analyze a frame and extract components, fonts, and colors
 async function analyzeFrame(frame) {
+  // Clear processed nodes set for fresh analysis
+  processedNodes.clear();
+
   const components = new Map(); // Use Map to store unique components with details
   const icons = new Map(); // Separate map for icons
   const fonts = new Map(); // Change to Map to store font with associated style
@@ -327,12 +330,17 @@ async function analyzeFrame(frame) {
     }
   }
 
-  // Convert colors Map to array with hex and style info
-  const colorArray = Array.from(colors.entries()).map(([hex, info]) => ({
-    hex: hex,
+  // Convert colors Map to array with hex, opacity, and style info
+  const colorArray = Array.from(colors.entries()).map(([, info]) => ({
+    hex: info.hex,
+    opacity: info.opacity,
+    displayHex: info.opacity < 1 ? `${info.hex} (${Math.round(info.opacity * 100)}%)` : info.hex,
     styleName: info.styleName,
     type: info.type
   })).sort((a, b) => a.hex.localeCompare(b.hex));
+
+  // Log colors with opacity for debugging
+  console.log('Colors with opacity:', colorArray.filter(c => c.opacity < 1).map(c => c.displayHex));
 
   // Convert fonts Map to array with complete font info
   const fontArray = Array.from(fonts.entries()).map(([fontKey, info]) => ({
@@ -382,7 +390,7 @@ async function analyzeFrame(frame) {
 }
 
 // Helper function to determine if a component is an icon
-function isComponentAnIcon(mainComponent, instanceNode) {
+function isComponentAnIcon(mainComponent) {
   const componentName = mainComponent.name;
   const masterName = (mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET')
     ? mainComponent.parent.name
@@ -396,6 +404,9 @@ function isComponentAnIcon(mainComponent, instanceNode) {
   return componentStartsWithLowercase || masterStartsWithLowercase;
 }
 
+// Track processed nodes to avoid duplicates
+const processedNodes = new Set();
+
 // Analyze a single node for components, fonts, colors, and styles (optimized)
 async function analyzeNode(node, components, icons, fonts, colors, colorStyles, textStyles, effectStyles) {
   try {
@@ -403,6 +414,12 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
     if (!node || !node.type || node.removed === true) {
       return;
     }
+
+    // Skip if we've already processed this node (prevent duplicates)
+    if (processedNodes.has(node.id)) {
+      return;
+    }
+    processedNodes.add(node.id);
 
     // Early exit for invisible or very small nodes (performance optimization)
     if (node.visible === false || (node.width < 1 && node.height < 1)) {
@@ -433,7 +450,7 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
           const variantKey = mainComponent.key || mainComponent.id;
 
           // Determine if this is an icon based on naming patterns and size
-          const isIcon = isComponentAnIcon(mainComponent, node);
+          const isIcon = isComponentAnIcon(mainComponent);
           const targetMap = isIcon ? icons : components;
 
           if (!targetMap.has(variantKey)) {
@@ -487,9 +504,6 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
             }
           }
 
-          const fontDetail = `${node.fontName.family} ${node.fontName.style} ${fontSize}px`;
-          console.log(`Font detected: ${fontDetail} on node: ${node.name || node.type}`);
-
           // Font detection progress removed for performance
 
           const fontKey = `${node.fontName.family} - ${node.fontName.style} - ${fontSize}px`;
@@ -538,6 +552,7 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
         if (fill.type === 'SOLID' && fill.color && fill.visible !== false && fill.opacity !== 0) {
           const color = fill.color;
           const hex = rgbToHex(color.r, color.g, color.b);
+          const opacity = fill.opacity !== undefined ? fill.opacity : 1; // Default to 1 if undefined
 
           // Color detection progress removed for performance
 
@@ -555,12 +570,20 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
             }
           }
 
-          // Store color with its associated style (if any)
-          if (!colors.has(hex)) {
-            colors.set(hex, { styleName: styleName, type: 'fill' });
-          } else if (styleName && !colors.get(hex).styleName) {
+          // Create unique key that includes opacity for different opacity values of same color
+          const colorKey = opacity < 1 ? `${hex}@${Math.round(opacity * 100)}%` : hex;
+
+          // Store color with its associated style and opacity
+          if (!colors.has(colorKey)) {
+            colors.set(colorKey, {
+              hex: hex,
+              opacity: opacity,
+              styleName: styleName,
+              type: 'fill'
+            });
+          } else if (styleName && !colors.get(colorKey).styleName) {
             // Update with style name if we didn't have one before
-            colors.get(hex).styleName = styleName;
+            colors.get(colorKey).styleName = styleName;
           }
         }
       }
@@ -572,6 +595,7 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
         if (stroke.type === 'SOLID' && stroke.color && stroke.visible !== false && stroke.opacity !== 0) {
           const color = stroke.color;
           const hex = rgbToHex(color.r, color.g, color.b);
+          const opacity = stroke.opacity !== undefined ? stroke.opacity : 1; // Default to 1 if undefined
 
           // Stroke color detection progress removed for performance
 
@@ -589,12 +613,20 @@ async function analyzeNode(node, components, icons, fonts, colors, colorStyles, 
             }
           }
 
-          // Store color with its associated style (if any)
-          if (!colors.has(hex)) {
-            colors.set(hex, { styleName: styleName, type: 'stroke' });
-          } else if (styleName && !colors.get(hex).styleName) {
+          // Create unique key that includes opacity for different opacity values of same color
+          const colorKey = opacity < 1 ? `${hex}@${Math.round(opacity * 100)}%` : hex;
+
+          // Store color with its associated style and opacity
+          if (!colors.has(colorKey)) {
+            colors.set(colorKey, {
+              hex: hex,
+              opacity: opacity,
+              styleName: styleName,
+              type: 'stroke'
+            });
+          } else if (styleName && !colors.get(colorKey).styleName) {
             // Update with style name if we didn't have one before
-            colors.get(hex).styleName = styleName;
+            colors.get(colorKey).styleName = styleName;
           }
         }
       }
@@ -864,7 +896,7 @@ async function createAnalysisFrame(originalFrame, analysisData) {
 
   // Add combined colors and color styles section
   if (analysisData.colors.length > 0 || analysisData.colorStyles.length > 0) {
-    currentY = await addCombinedColorSection(analysisFrame, "Colors & Styles", analysisData.colors, analysisData.colorStyles, currentY, padding);
+    currentY = await addCombinedColorSection(analysisFrame, "Colors & Styles", analysisData.colors, currentY, padding);
   }
 
   // Add effect styles section
@@ -1276,8 +1308,12 @@ function storeAnalysisData(frameName, analysisData) {
   }
 }
 
+
+
 // Collect aggregated data from stored analysis data
 async function collectSummaryData() {
+  // Skip cache population - use direct aggregation from analysis frames instead
+
   const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
   const analysisFrames = allFrames.filter(frame => frame.name.startsWith('Analysis: '));
 
@@ -1289,33 +1325,18 @@ async function collectSummaryData() {
 
   console.log(`Collecting summary data from ${globalAnalysisData.size} stored analyses`);
   console.log(`Found ${frameCount} analysis frames on page`);
+  console.log(`Performance optimization: Using cached data instead of re-analyzing all frames`);
 
-  // Always re-analyze existing frames to ensure we have complete data
-  console.log('Re-analyzing all existing frames to ensure complete summary...');
+  // Use existing cached data only (no re-analysis or extraction needed!)
+  console.log('Using existing cached analysis data for summary generation...');
+  console.log(`Available cached data for ${globalAnalysisData.size} frames`);
 
-  for (const analysisFrame of analysisFrames) {
-    const originalFrameName = analysisFrame.name.replace('Analysis: ', '');
-    const originalFrame = allFrames.find(frame =>
-      frame.name === originalFrameName && !frame.name.startsWith('Analysis:') && !frame.name.startsWith('Summary')
-    );
-
-    if (originalFrame) {
-      try {
-        console.log(`Re-analyzing frame: ${originalFrameName}`);
-        const frameData = await analyzeFrame(originalFrame);
-        globalAnalysisData.set(originalFrameName, frameData);
-      } catch (error) {
-        console.warn(`Could not re-analyze frame: ${originalFrameName}`, error);
-      }
-    }
-  }
+  // Summary of data usage
+  console.log(`Summary generation complete: Using data from ${globalAnalysisData.size} frames`);
 
   // Aggregate data from stored analysis results
   for (const [frameName, analysisData] of globalAnalysisData.entries()) {
-    console.log(`Processing stored data for: ${frameName}`);
-    console.log(`  Components: ${analysisData.components ? analysisData.components.length : 0}`);
-    console.log(`  Fonts: ${analysisData.fonts ? analysisData.fonts.length : 0}`);
-    console.log(`  Colors: ${analysisData.colors ? analysisData.colors.length : 0}`);
+    // Removed verbose logging for better performance
 
     // Aggregate components (unique by master name + variant name)
     if (analysisData.components) {
@@ -1712,6 +1733,7 @@ async function addSummaryColorsSection(frame, colors, startY, padding) {
   // List colors with swatches
   for (const color of colors) {
     const colorHex = color.hex || color;
+    const displayText = color.displayHex || colorHex; // Use displayHex if available (includes opacity)
     const rgb = hexToRgb(colorHex);
 
     // Color swatch
@@ -1719,7 +1741,13 @@ async function addSummaryColorsSection(frame, colors, startY, padding) {
     swatch.resize(16, 16);
     swatch.x = safePadding + 12;
     swatch.y = currentY + 2;
-    swatch.fills = [{ type: 'SOLID', color: rgb }];
+
+    // Apply opacity to swatch if available
+    const swatchFill = { type: 'SOLID', color: rgb };
+    if (color.opacity !== undefined && color.opacity < 1) {
+      swatchFill.opacity = color.opacity;
+    }
+    swatch.fills = [swatchFill];
     swatch.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
     swatch.strokeWeight = 1;
     frame.appendChild(swatch);
@@ -1730,7 +1758,7 @@ async function addSummaryColorsSection(frame, colors, startY, padding) {
     colorText.fontName = colorFont;
     colorText.fontSize = 12;
     const styleName = color.styleName ? ` (${color.styleName})` : '';
-    colorText.characters = `${colorHex}${styleName}`;
+    colorText.characters = `${displayText}${styleName}`;
     colorText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
     colorText.x = safePadding + 36;
     colorText.y = currentY;
@@ -1912,7 +1940,7 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
     const fontsWithStyles = [];
     const fontsWithoutStyles = [];
 
-    for (const [fontKey, fontInfo] of allFonts) {
+    for (const [, fontInfo] of allFonts) {
       if (fontInfo.styleName) {
         fontsWithStyles.push(fontInfo);
       } else {
@@ -1965,7 +1993,7 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
 }
 
 // Add a combined color section with color swatches and styles
-async function addCombinedColorSection(frame, title, colors, colorStyles, startY, padding) {
+async function addCombinedColorSection(frame, title, colors, startY, padding) {
   // Section title
   const sectionTitle = figma.createText();
   const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
@@ -1987,12 +2015,14 @@ async function addCombinedColorSection(frame, title, colors, colorStyles, startY
 
     for (const colorInfo of colors) {
       const hex = colorInfo.hex || colorInfo; // Handle both old and new format
+      const displayHex = colorInfo.displayHex || hex; // Use displayHex if available (includes opacity)
       const styleName = colorInfo.styleName;
+      const opacity = colorInfo.opacity;
 
       if (styleName) {
-        colorsWithStyles.push({ hex, styleName });
+        colorsWithStyles.push({ hex, displayHex, styleName, opacity });
       } else {
-        colorsWithoutStyles.push({ hex, styleName: null });
+        colorsWithoutStyles.push({ hex, displayHex, styleName: null, opacity });
       }
     }
 
@@ -2009,19 +2039,25 @@ async function addCombinedColorSection(frame, title, colors, colorStyles, startY
       swatch.resize(20, 20);
       swatch.x = padding + 12;
       swatch.y = currentY;
-      swatch.fills = [{ type: 'SOLID', color: rgb }];
+
+      // Apply opacity to swatch if available
+      const swatchFill = { type: 'SOLID', color: rgb };
+      if (colorInfo.opacity !== undefined && colorInfo.opacity < 1) {
+        swatchFill.opacity = colorInfo.opacity;
+      }
+      swatch.fills = [swatchFill];
       swatch.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
       swatch.strokeWeight = 1;
       swatch.cornerRadius = 3;
       frame.appendChild(swatch);
 
-      // Color text with hex and style name
+      // Color text with hex (including opacity) and style name
       const colorText = figma.createText();
       const colorFont = await loadFontSafely({ family: "Inter", style: "Regular" });
       colorText.fontName = colorFont;
       colorText.fontSize = 12;
 
-      const displayText = `${colorInfo.hex} - ${colorInfo.styleName}`;
+      const displayText = `${colorInfo.displayHex} - ${colorInfo.styleName}`;
       colorText.characters = displayText;
       colorText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
       colorText.x = padding + 40;
@@ -2040,19 +2076,25 @@ async function addCombinedColorSection(frame, title, colors, colorStyles, startY
       swatch.resize(20, 20);
       swatch.x = padding + 12;
       swatch.y = currentY;
-      swatch.fills = [{ type: 'SOLID', color: rgb }];
+
+      // Apply opacity to swatch if available
+      const swatchFill = { type: 'SOLID', color: rgb };
+      if (colorInfo.opacity !== undefined && colorInfo.opacity < 1) {
+        swatchFill.opacity = colorInfo.opacity;
+      }
+      swatch.fills = [swatchFill];
       swatch.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
       swatch.strokeWeight = 1;
       swatch.cornerRadius = 3;
       frame.appendChild(swatch);
 
-      // Color text with just hex value
+      // Color text with hex value (including opacity)
       const colorText = figma.createText();
       const colorFont = await loadFontSafely({ family: "Inter", style: "Regular" });
       colorText.fontName = colorFont;
       colorText.fontSize = 12;
 
-      colorText.characters = colorInfo.hex;
+      colorText.characters = colorInfo.displayHex;
       colorText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }]; // Slightly lighter color
       colorText.x = padding + 40;
       colorText.y = currentY + 2;
