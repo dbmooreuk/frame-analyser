@@ -40,7 +40,7 @@ figma.ui.onmessage = async (msg) => {
   } else if (msg.type === 'getFramesList') {
     // Send current frames list to UI
     await cleanupAnalyzedFrames(); // Clean up first
-    const framesList = await getAnalyzedFramesList();
+    const framesList = await getFilteredAnalyzedFramesList();
     figma.ui.postMessage({
       type: 'framesListUpdated',
       framesList: Object.values(framesList)
@@ -106,7 +106,7 @@ figma.ui.onmessage = async (msg) => {
         state: 'analyzing'
       });
 
-      const framesList = await getAnalyzedFramesList();
+      const framesList = await getFilteredAnalyzedFramesList();
       const frameIds = Object.keys(framesList);
       const validFrames = [];
 
@@ -1169,20 +1169,30 @@ async function addFrameReference(analysisFrame, originalFrame) {
   referenceLabel.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
   referenceContainer.appendChild(referenceLabel);
 
-  // Clone the original frame
-  const frameClone = originalFrame.clone();
+  // Snapshot the original frame to a fixed-size image to preserve exact dimensions
+  const targetWidth = Math.round(originalFrame.width);
+  const targetHeight = Math.round(originalFrame.height);
+  const pngBytes = await originalFrame.exportAsync({ format: 'PNG' });
+  const image = figma.createImage(pngBytes);
 
-  // Keep the original frame's dimensions
-  const targetWidth = originalFrame.width;
-  const targetHeight = originalFrame.height;
+  // Use a rectangle with the exact original size and place the image as a fill
+  const refRect = figma.createRectangle();
+  refRect.resize(targetWidth, targetHeight);
+  refRect.fills = [{ type: 'IMAGE', imageHash: image.hash, scaleMode: 'FIT' }];
 
-  // Add a subtle border around the reference frame
-  frameClone.strokes = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.9 } }];
-  frameClone.strokeWeight = 1;
-  frameClone.cornerRadius = 4;
+  // Keep the reference from stretching in parent auto layout
+  if ('layoutAlign' in refRect) refRect.layoutAlign = 'INHERIT';
+  if ('layoutGrow' in refRect) refRect.layoutGrow = 0;
+  if ('layoutSizingHorizontal' in refRect) refRect.layoutSizingHorizontal = 'FIXED';
+  if ('layoutSizingVertical' in refRect) refRect.layoutSizingVertical = 'FIXED';
 
-  // Add the clone to the reference container
-  referenceContainer.appendChild(frameClone);
+  // Add a subtle border around the reference
+  refRect.strokes = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.9 } }];
+  refRect.strokeWeight = 1;
+  refRect.cornerRadius = 4;
+
+  // Add to the reference container
+  referenceContainer.appendChild(refRect);
 
   // Add a size indicator
   const sizeLabel = figma.createText();
@@ -1288,10 +1298,11 @@ async function saveAnalyzedFrame(frameId, frameData) {
     // Also save to client storage for backward compatibility
     await figma.clientStorage.setAsync('analyzedFrames', framesList);
 
-    // Send updated list to UI
+    // Send updated, filtered list to UI (only frames with live analysis on Frames Analysed)
+    const filtered = await getFilteredAnalyzedFramesList();
     figma.ui.postMessage({
       type: 'framesListUpdated',
-      framesList: Object.values(framesList)
+      framesList: Object.values(filtered)
     });
   } catch (error) {
     console.warn('Failed to save analyzed frame:', error);
@@ -1325,10 +1336,11 @@ async function cleanupAnalyzedFrames() {
       // Also save to client storage for backward compatibility
       await figma.clientStorage.setAsync('analyzedFrames', updatedFramesList);
 
-      // Send updated list to UI
+      // Send updated, filtered list to UI
+      const filtered = await getFilteredAnalyzedFramesList();
       figma.ui.postMessage({
         type: 'framesListUpdated',
-        framesList: Object.values(updatedFramesList)
+        framesList: Object.values(filtered)
       });
     }
 
@@ -1337,6 +1349,41 @@ async function cleanupAnalyzedFrames() {
     console.warn('Failed to cleanup analyzed frames:', error);
     return {};
   }
+}
+
+
+// Determine the page for a given node
+function getNodePage(node) {
+  let parent = node.parent;
+  while (parent && parent.type !== 'PAGE' && parent.type !== 'DOCUMENT') {
+    parent = parent.parent;
+  }
+  return (parent && parent.type === 'PAGE') ? parent : null;
+}
+
+// Return only analyzed frames that currently have an analysis frame on the "Frames Analysed" page
+async function getFilteredAnalyzedFramesList() {
+  const framesList = await getAnalyzedFramesList();
+  const filtered = {};
+  try {
+    for (const [frameId, data] of Object.entries(framesList)) {
+      if (!data || !data.analysisFrameId) continue;
+      try {
+        const analysisNode = figma.getNodeById(data.analysisFrameId);
+        if (!analysisNode || analysisNode.type !== 'FRAME') continue;
+        if (!analysisNode.name || !analysisNode.name.startsWith('Analysis:')) continue;
+        const page = getNodePage(analysisNode);
+        if (!page || page.name !== 'Frames Analysed') continue;
+        filtered[frameId] = data;
+      } catch (_e) {
+        // Skip invalid entries
+      }
+    }
+  } catch (_err) {
+    // If anything goes wrong, fall back to returning the unfiltered list
+    return framesList;
+  }
+  return filtered;
 }
 
 // Font cache to avoid repeated font loading (major performance improvement)
