@@ -924,6 +924,15 @@ async function createAnalysisFrame(originalFrame, analysisData) {
       analysisFrame = existingAnalysisFrame;
       // Clear existing content
       analysisFrame.children.forEach(child => child.remove());
+
+      // Update the name with new timestamp
+      const timestamp = new Date().toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      analysisFrame.name = `Analysis: ${analysisData.frameInfo.name} (${timestamp})`;
+
       wasUpdated = true;
 
       figma.ui.postMessage({
@@ -931,12 +940,20 @@ async function createAnalysisFrame(originalFrame, analysisData) {
         message: 'Updating existing analysis...'
       });
     } else {
-      // Create new analysis frame
+      // Create new analysis frame with unique name
       analysisFrame = figma.createFrame();
-      analysisFrame.name = `Analysis: ${analysisData.frameInfo.name}`;
+      const timestamp = new Date().toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      analysisFrame.name = `Analysis: ${analysisData.frameInfo.name} (${timestamp})`;
 
-      // Find the best position for the new analysis frame
-      const position = findBestAnalysisPosition(originalFrame);
+      // Get or create the analysis page
+      const analysisPage = findOrCreateAnalysisPage();
+
+      // Find the best position for the new analysis frame on the analysis page
+      const position = findBestAnalysisPosition(analysisPage);
       analysisFrame.x = position.x;
       analysisFrame.y = position.y;
 
@@ -1044,12 +1061,15 @@ async function createAnalysisFrame(originalFrame, analysisData) {
 
     analysisFrame.resize(finalWidth, finalHeight);
 
-    // Add to current page if it's a new frame
+    // Add to analysis page if it's a new frame
     if (!wasUpdated) {
-      figma.currentPage.appendChild(analysisFrame);
+      const analysisPage = findOrCreateAnalysisPage();
+      analysisPage.appendChild(analysisFrame);
     }
 
-    // Select the analysis frame
+    // Switch to the analysis page and select the analysis frame
+    const analysisPage = findOrCreateAnalysisPage();
+    figma.currentPage = analysisPage;
     figma.currentPage.selection = [analysisFrame];
     figma.viewport.scrollAndZoomIntoView([analysisFrame]);
 
@@ -1061,17 +1081,20 @@ async function createAnalysisFrame(originalFrame, analysisData) {
   }
 }
 
-// Find existing analysis frame for the given original frame
+// Find existing analysis frame for the given original frame on the analysis page
 function findExistingAnalysisFrame(originalFrame) {
   const expectedAnalysisName = `Analysis: ${originalFrame.name}`;
 
-  // Search through all frames on the current page, including nested frames
-  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
+  // Get or create the analysis page
+  const analysisPage = findOrCreateAnalysisPage();
+
+  // Search through all frames on the analysis page
+  const allFrames = analysisPage.findAll(node => node.type === 'FRAME');
 
   for (const frame of allFrames) {
-    if (frame.name === expectedAnalysisName) {
-      // Found a matching analysis frame - return it regardless of position
-      // This ensures we always replace existing analyses for the same frame
+    // Check if frame name starts with the expected analysis name (ignoring timestamp)
+    if (frame.name.startsWith(expectedAnalysisName)) {
+      // Found a matching analysis frame - return it for replacement
       return frame;
     }
   }
@@ -1079,17 +1102,48 @@ function findExistingAnalysisFrame(originalFrame) {
   return null;
 }
 
-// Find the best position for a new analysis frame
-function findBestAnalysisPosition(originalFrame) {
-  // Get all existing analysis frames
-  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
-  const analysisFrames = allFrames.filter(frame => frame.name.startsWith('Analysis: '));
+// Find or create the "Frames Analysed" page
+function findOrCreateAnalysisPage() {
+  // Look for existing "Frames Analysed" page
+  const existingPage = figma.root.children.find(page => page.name === "Frames Analysed");
+
+  if (existingPage) {
+    return existingPage;
+  }
+
+  // Create new "Frames Analysed" page
+  const analysisPage = figma.createPage();
+  analysisPage.name = "Frames Analysed";
+
+  // Set a light background color for the analysis page
+  analysisPage.backgrounds = [{
+    type: 'SOLID',
+    color: { r: 0.98, g: 0.98, b: 0.98 },
+    visible: true
+  }];
+
+  return analysisPage;
+}
+
+// Find the best position for a new analysis frame on the analysis page
+function findBestAnalysisPosition(analysisPage) {
+  // Get all existing analysis frames on the analysis page (excluding summary)
+  const analysisFrames = analysisPage.findAll(node =>
+    node.type === 'FRAME' &&
+    node.name.startsWith('Analysis: ') &&
+    node.name !== 'Summary Analysis'
+  );
+
+  // Reserve space for summary on the left (400px width + 100px gap)
+  const summaryReservedWidth = 500;
+  const startX = summaryReservedWidth + 100; // Start analysis frames after summary space
+  const startY = 100;
 
   if (analysisFrames.length === 0) {
-    // First analysis frame - position to the right of the original frame
+    // First analysis frame - position after summary space
     return {
-      x: Math.max(0, originalFrame.x + originalFrame.width + 100),
-      y: Math.max(0, originalFrame.y)
+      x: startX,
+      y: startY
     };
   }
 
@@ -1101,10 +1155,10 @@ function findBestAnalysisPosition(originalFrame) {
     }
   }
 
-  // Position the new analysis frame to the right of the rightmost one
+  // Position to the right of the rightmost frame
   return {
-    x: rightmostFrame.x + rightmostFrame.width + 50, // 50px gap between analysis frames
-    y: rightmostFrame.y // Same Y position as the rightmost frame
+    x: rightmostFrame.x + rightmostFrame.width + 100, // 100px gap between frames
+    y: startY // Keep all analysis frames at the same Y level
   };
 }
 
@@ -1159,8 +1213,11 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
 
 // Create or update the summary analysis frame
 async function createOrUpdateSummaryAnalysis() {
-  // Find existing summary frame
-  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
+  // Get or create the analysis page
+  const analysisPage = findOrCreateAnalysisPage();
+
+  // Find existing summary frame on the analysis page
+  const allFrames = analysisPage.findAll(node => node.type === 'FRAME');
   let summaryFrame = allFrames.find(frame => frame.name === 'Summary Analysis');
 
   // Collect data from all analysis frames
@@ -1174,13 +1231,13 @@ async function createOrUpdateSummaryAnalysis() {
     summaryFrame = figma.createFrame();
     summaryFrame.name = 'Summary Analysis';
 
-    // Position at the top-left of all analysis frames
-    const position = findSummaryPosition();
+    // Position at the top-left of the analysis page
+    const position = findSummaryPosition(analysisPage);
     summaryFrame.x = position.x;
     summaryFrame.y = position.y;
 
-    // Add to page
-    figma.currentPage.appendChild(summaryFrame);
+    // Add to analysis page
+    analysisPage.appendChild(summaryFrame);
   }
 
   // Style the summary frame
@@ -1434,7 +1491,9 @@ function storeAnalysisData(frameName, analysisData) {
 async function collectSummaryData() {
   // Skip cache population - use direct aggregation from analysis frames instead
 
-  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
+  // Get analysis frames from the analysis page
+  const analysisPage = findOrCreateAnalysisPage();
+  const allFrames = analysisPage.findAll(node => node.type === 'FRAME');
   const analysisFrames = allFrames.filter(frame => frame.name.startsWith('Analysis: '));
 
   const aggregatedComponents = new Map();
@@ -1444,7 +1503,7 @@ async function collectSummaryData() {
   const frameCount = analysisFrames.length;
 
   console.log(`Collecting summary data from ${globalAnalysisData.size} stored analyses`);
-  console.log(`Found ${frameCount} analysis frames on page`);
+  console.log(`Found ${frameCount} analysis frames on analysis page`);
   console.log(`Performance optimization: Using cached data instead of re-analyzing all frames`);
 
   // Use existing cached data only (no re-analysis or extraction needed!)
@@ -1525,20 +1584,12 @@ async function collectSummaryData() {
   return result;
 }
 
-// Find the best position for the summary frame
-function findSummaryPosition() {
-  const allFrames = figma.currentPage.findAll(node => node.type === 'FRAME');
-  const analysisFrames = allFrames.filter(frame => frame.name.startsWith('Analysis: '));
-
-  if (analysisFrames.length === 0) {
-    return { x: 100, y: 100 };
-  }
-
-  // Position above the first analysis frame
-  const firstFrame = analysisFrames[0];
+// Find the best position for the summary frame on the analysis page
+function findSummaryPosition(analysisPage) {
+  // Position summary on the left side, aligned with analysis frames
   return {
-    x: firstFrame.x,
-    y: firstFrame.y - 800 // 800px above the first analysis frame
+    x: 100, // Left margin
+    y: 100  // Same Y position as analysis frames
   };
 }
 
