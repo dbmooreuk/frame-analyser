@@ -45,3 +45,4 @@ build/
 
 # Figma plugin specific
 # (Currently no specific ignores needed for basic plugin)
+.qodo

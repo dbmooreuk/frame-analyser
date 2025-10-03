@@ -449,6 +449,7 @@
       </div>
       <div class="bulk-actions">
         <button class="bulk-action-btn primary" id="re-analyze-all-btn" disabled>Re-analyze All</button>
+        <button class="bulk-action-btn" id="export-json-btn" disabled>Export Stylesheet</button>
         <button class="bulk-action-btn" id="clear-list-btn" disabled>Clear List</button>
       </div>
     </div>
@@ -467,6 +468,7 @@
     const frameList = document.getElementById('frame-list');
     const emptyState = document.getElementById('empty-state');
     const reAnalyzeAllBtn = document.getElementById('re-analyze-all-btn');
+    const exportJsonBtn = document.getElementById('export-json-btn');
     const clearListBtn = document.getElementById('clear-list-btn');
     const frameHistory = document.getElementById('frame-history');
     const frameHistoryToggle = document.getElementById('frame-history-toggle');
@@ -498,6 +500,10 @@
       reAnalyzeAllBtn.disabled = true;
 
       parent.postMessage({ pluginMessage: { type: 'reAnalyzeAll' } }, '*');
+    });
+
+    exportJsonBtn.addEventListener('click', () => {
+      parent.postMessage({ pluginMessage: { type: 'exportJson' } }, '*');
     });
 
     clearListBtn.addEventListener('click', () => {
@@ -542,6 +548,8 @@
         updateFramesList(msg.framesList);
       } else if (msg.type === 'updateButtonState') {
         updateButtonState(msg);
+      } else if (msg.type === 'jsonExport') {
+        downloadJson(msg.data, msg.filename);
       }
     };
 
@@ -550,6 +558,7 @@
       if (!framesList || framesList.length === 0) {
         frameList.innerHTML = '<div class="empty-state">No frames analyzed yet. Analyze a frame to see it listed here.</div>';
         reAnalyzeAllBtn.disabled = true;
+        exportJsonBtn.disabled = true;
         clearListBtn.disabled = true;
         return;
       }
@@ -575,6 +584,7 @@
       }).join('');
 
       reAnalyzeAllBtn.disabled = false;
+      exportJsonBtn.disabled = false;
       clearListBtn.disabled = false;
     }
 
@@ -639,6 +649,21 @@
           reAnalyzeAllBtn.disabled = false;
         }
       }
+    }
+
+    // Download JSON file
+    function downloadJson(data, filename) {
+      const jsonString = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
     
     // Show status message

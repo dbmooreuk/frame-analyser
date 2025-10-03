@@ -176,6 +176,40 @@ figma.ui.onmessage = async (msg) => {
         message: 'Failed to clear frames list: ' + error.message
       });
     }
+  } else if (msg.type === 'exportJson') {
+    // Export LVGL JSON data
+    try {
+      console.log('Exporting JSON data...');
+      console.log('Available cached data:', globalAnalysisData.size, 'frames');
+
+      const jsonData = generateLVGLJson();
+
+      if (Object.keys(jsonData.typography).length === 0 && Object.keys(jsonData.colors).length === 0) {
+        figma.ui.postMessage({
+          type: 'warning',
+          message: 'No data available for export. Please analyze some frames first or click "Re-analyze All" to populate the cache.'
+        });
+        return;
+      }
+
+      figma.ui.postMessage({
+        type: 'jsonExport',
+        data: jsonData,
+        filename: `lvgl_stylesheet_${new Date().toISOString().split('T')[0]}.json`
+      });
+
+      figma.ui.postMessage({
+        type: 'success',
+        message: `LVGL stylesheet exported! ${Object.keys(jsonData.typography).length} typography styles, ${Object.keys(jsonData.colors).length} colors.`,
+        autoDismiss: true,
+        dismissAfter: 4000
+      });
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to export JSON: ' + error.message
+      });
+    }
   }
 };
 
@@ -2318,6 +2352,90 @@ function hexToRgb565(hex) {
 
   // Return as hex string (4 digits)
   return '0x' + rgb565.toString(16).toUpperCase().padStart(4, '0');
+}
+
+// Generate simplified JSON export for LVGL stylesheet
+function generateLVGLJson() {
+  const jsonData = {
+    colors: {},
+    typography: {}
+  };
+
+  // Process all cached analysis data
+  for (const [, analysisData] of globalAnalysisData.entries()) {
+    // Process typography
+    if (analysisData.fonts) {
+      analysisData.fonts.forEach(font => {
+        const fontFamily = font.fontFamily || 'unknown';
+        const fontStyle = font.fontStyle || 'regular';
+        const fontSize = font.fontSize || 12;
+
+        // Prioritize Figma style name, fallback to constructed name
+        let styleKey;
+        if (font.styleName) {
+          // Use the actual Figma style name
+          styleKey = font.styleName;
+        } else {
+          // Fallback to constructed name
+          styleKey = `${fontFamily}_${fontStyle}_${fontSize}`;
+        }
+
+        // Convert to valid LVGL identifier while preserving readability
+        const lvglName = styleKey
+          .replace(/[^a-zA-Z0-9_\s-]/g, '') // Remove special chars except spaces and hyphens
+          .replace(/[\s-]+/g, '_')          // Replace spaces and hyphens with underscores
+          .toLowerCase();
+
+        if (!jsonData.typography[lvglName]) {
+          jsonData.typography[lvglName] = {
+            figma_style_name: font.styleName || null,
+            font_family: fontFamily,
+            font_size: fontSize,
+            font_weight: fontStyle,
+            lvgl_font: `&${lvglName}`,
+            lvgl_declaration: `LV_FONT_DECLARE(${lvglName});`
+          };
+        }
+      });
+    }
+
+    // Process colors
+    if (analysisData.colors) {
+      analysisData.colors.forEach(color => {
+        const hex = color.hex || '#000000';
+        const rgb565 = color.rgb565 || hexToRgb565(hex);
+
+        // Prioritize Figma style name, fallback to hex-based name
+        let colorKey;
+        if (color.styleName) {
+          // Use the actual Figma style name
+          colorKey = color.styleName;
+        } else {
+          // Fallback to hex-based name
+          colorKey = hex.replace('#', 'color_');
+        }
+
+        // Convert to valid LVGL identifier while preserving readability
+        const lvglName = colorKey
+          .replace(/[^a-zA-Z0-9_\s-]/g, '') // Remove special chars except spaces and hyphens
+          .replace(/[\s-]+/g, '_')          // Replace spaces and hyphens with underscores
+          .toLowerCase();
+
+        if (!jsonData.colors[lvglName]) {
+          jsonData.colors[lvglName] = {
+            figma_style_name: color.styleName || null,
+            hex: hex,
+            rgb565: rgb565,
+            lvgl_color: `lv_color_hex(${hex.replace('#', '0x')})`,
+            lvgl_macro: `#define ${lvglName.toUpperCase()} ${rgb565}`
+          };
+        }
+      });
+    }
+
+  }
+
+  return jsonData;
 }
 
 // Plugin is ready - waiting for user interaction
