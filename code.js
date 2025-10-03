@@ -963,6 +963,16 @@ async function createAnalysisFrame(originalFrame, analysisData) {
       });
     }
 
+    // Configure analysis frame as auto layout with content hugging
+    analysisFrame.layoutMode = 'VERTICAL';
+    analysisFrame.primaryAxisSizingMode = 'AUTO'; // Hug contents vertically
+    analysisFrame.counterAxisSizingMode = 'AUTO'; // Hug contents horizontally
+    analysisFrame.paddingTop = 60;
+    analysisFrame.paddingBottom = 60;
+    analysisFrame.paddingLeft = 60;
+    analysisFrame.paddingRight = 60;
+    analysisFrame.itemSpacing = 32; // Space between sections
+
     analysisFrame.fills = [{ type: 'SOLID', color: { r: 0.95, g: 0.95, b: 0.95 } }];
     analysisFrame.cornerRadius = 12;
     analysisFrame.effects = [{
@@ -974,9 +984,8 @@ async function createAnalysisFrame(originalFrame, analysisData) {
       blendMode: 'NORMAL'
     }];
 
-  let currentY = 50;
-  const padding = 50;
-  const sectionSpacing = 32;
+  // Auto layout padding is now set on frames; no manual padding var needed
+  const sectionSpacing = 32; // This is now handled by itemSpacing
 
     // Add frame name as the first item (32px Bold #000000)
     const frameName = figma.createText();
@@ -985,10 +994,7 @@ async function createAnalysisFrame(originalFrame, analysisData) {
     frameName.fontSize = 32;
     frameName.characters = analysisData.frameInfo.name;
     frameName.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }]; // #000000
-    frameName.x = padding;
-    frameName.y = currentY;
     analysisFrame.appendChild(frameName);
-    currentY += frameName.height + 16;
 
     // Add element count subtitle
     const subtitle = figma.createText();
@@ -997,14 +1003,10 @@ async function createAnalysisFrame(originalFrame, analysisData) {
     subtitle.fontSize = 14;
     subtitle.characters = `${analysisData.frameInfo.elementCount} elements`;
     subtitle.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
-    subtitle.x = padding;
-    subtitle.y = currentY;
     analysisFrame.appendChild(subtitle);
-    currentY += subtitle.height + 16;
 
     // Add visual reference of the analyzed frame
-    currentY = await addFrameReference(analysisFrame, originalFrame, currentY, padding);
-    currentY += sectionSpacing;
+    await addFrameReference(analysisFrame, originalFrame);
 
   // Add components section
   if (analysisData.components.length > 0) {
@@ -1013,7 +1015,7 @@ async function createAnalysisFrame(originalFrame, analysisData) {
       message: 'Building analysis frame...',
       details: `Adding ${analysisData.components.length} components`
     });
-    currentY = await addComponentSection(analysisFrame, "Components Used", analysisData.components, currentY, padding);
+    await addComponentSection(analysisFrame, "Components Used", analysisData.components);
   }
 
   // Add icons section
@@ -1023,43 +1025,28 @@ async function createAnalysisFrame(originalFrame, analysisData) {
       message: 'Building analysis frame...',
       details: `Adding ${analysisData.icons.length} icons`
     });
-    currentY = await addComponentSection(analysisFrame, "Icons Used", analysisData.icons, currentY, padding);
+    await addComponentSection(analysisFrame, "Icons Used", analysisData.icons);
   }
 
   // Add combined fonts and text styles section
   if (analysisData.fonts.length > 0 || analysisData.textStyles.length > 0) {
-    currentY = await addCombinedFontSection(analysisFrame, "Fonts & Text Styles", analysisData.fonts, analysisData.textStyles, currentY, padding);
+    await addCombinedFontSection(analysisFrame, "Fonts & Text Styles", analysisData.fonts, analysisData.textStyles);
   }
 
   // Add combined colors and color styles section
   if (analysisData.colors.length > 0 || analysisData.colorStyles.length > 0) {
-    currentY = await addCombinedColorSection(analysisFrame, "Colors & Styles", analysisData.colors, currentY, padding);
+    await addCombinedColorSection(analysisFrame, "Colors & Styles", analysisData.colors);
   }
 
   // Add effect styles section
   if (analysisData.effectStyles.length > 0) {
-    currentY = await addSection(analysisFrame, "Effect Styles", analysisData.effectStyles, currentY, padding);
+    await addSection(analysisFrame, "Effect Styles", analysisData.effectStyles);
   }
 
   // Add summary section
-  currentY = await addSummarySection(analysisFrame, analysisData, currentY, padding);
+  await addSummarySection(analysisFrame, analysisData);
 
-    // Calculate required width by checking all child elements
-    let maxWidth = 0;
-    for (const child of analysisFrame.children) {
-      const childRight = child.x + child.width;
-      maxWidth = Math.max(maxWidth, childRight);
-    }
-
-    // Set frame size with minimum dimensions and content-based width
-    // Minimum width needs to accommodate the original frame reference plus padding
-    const minWidth = originalFrame.width + (padding * 2); // Original frame width + padding
-    const minHeight = 200;
-    const contentWidth = maxWidth + (padding * 2); // Add extra padding to the right
-    const finalWidth = Math.max(minWidth, contentWidth);
-    const finalHeight = Math.max(minHeight, currentY + padding);
-
-    analysisFrame.resize(finalWidth, finalHeight);
+    // Auto layout will handle sizing automatically based on content and padding
 
     // Add to analysis page if it's a new frame
     if (!wasUpdated) {
@@ -1163,7 +1150,16 @@ function findBestAnalysisPosition(analysisPage) {
 }
 
 // Add a visual reference of the analyzed frame
-async function addFrameReference(analysisFrame, originalFrame, startY, padding) {
+async function addFrameReference(analysisFrame, originalFrame) {
+  // Create a container frame for the visual reference section
+  const referenceContainer = figma.createFrame();
+  referenceContainer.name = "Visual Reference";
+  referenceContainer.layoutMode = 'VERTICAL';
+  referenceContainer.primaryAxisSizingMode = 'AUTO';
+  referenceContainer.counterAxisSizingMode = 'AUTO';
+  referenceContainer.itemSpacing = 8;
+  referenceContainer.fills = []; // Transparent background
+
   // Create a label for the reference
   const referenceLabel = figma.createText();
   const labelFont = await loadFontSafely(await getBestAvailableFont("Bold"));
@@ -1171,11 +1167,7 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
   referenceLabel.fontSize = 14;
   referenceLabel.characters = "Visual Reference:";
   referenceLabel.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
-  referenceLabel.x = padding;
-  referenceLabel.y = startY;
-  analysisFrame.appendChild(referenceLabel);
-
-  let currentY = startY + referenceLabel.height + 8;
+  referenceContainer.appendChild(referenceLabel);
 
   // Clone the original frame
   const frameClone = originalFrame.clone();
@@ -1183,19 +1175,14 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
   // Keep the original frame's dimensions
   const targetWidth = originalFrame.width;
   const targetHeight = originalFrame.height;
-  // No need to resize since clone already has the correct size
-
-  // Position the clone
-  frameClone.x = padding;
-  frameClone.y = currentY;
 
   // Add a subtle border around the reference frame
   frameClone.strokes = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.9 } }];
   frameClone.strokeWeight = 1;
   frameClone.cornerRadius = 4;
 
-  // Add the clone to the analysis frame
-  analysisFrame.appendChild(frameClone);
+  // Add the clone to the reference container
+  referenceContainer.appendChild(frameClone);
 
   // Add a size indicator
   const sizeLabel = figma.createText();
@@ -1204,11 +1191,10 @@ async function addFrameReference(analysisFrame, originalFrame, startY, padding) 
   sizeLabel.fontSize = 10;
   sizeLabel.characters = `Displayed at ${targetWidth} x ${targetHeight}px`;
   sizeLabel.fills = [{ type: 'SOLID', color: { r: 0.6, g: 0.6, b: 0.6 } }];
-  sizeLabel.x = padding;
-  sizeLabel.y = currentY + frameClone.height + 4;
-  analysisFrame.appendChild(sizeLabel);
+  referenceContainer.appendChild(sizeLabel);
 
-  return currentY + frameClone.height + sizeLabel.height + 8;
+  // Add the reference container to the analysis frame
+  analysisFrame.appendChild(referenceContainer);
 }
 
 // Create or update the summary analysis frame
@@ -1593,99 +1579,84 @@ function findSummaryPosition(analysisPage) {
   };
 }
 
-// Populate the summary frame with content
+// Populate the summary frame with content using auto layout
 async function populateSummaryContent(summaryFrame, summaryData) {
-  const padding = 50;
-  let currentY = padding;
+  // Ensure the summary frame uses auto layout and hugs content
+  summaryFrame.layoutMode = 'VERTICAL';
+  summaryFrame.primaryAxisSizingMode = 'AUTO';
+  summaryFrame.counterAxisSizingMode = 'AUTO';
+  summaryFrame.itemSpacing = 12;
+  summaryFrame.paddingTop = 60;
+  summaryFrame.paddingBottom = 60;
+  summaryFrame.paddingLeft = 60;
+  summaryFrame.paddingRight = 60;
 
-  // Summary title
+  // Title
   const title = figma.createText();
   const titleFont = await loadFontSafely(await getBestAvailableFont("Bold"));
   title.fontName = titleFont;
   title.fontSize = 32;
   title.characters = 'Summary Analysis';
   title.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }];
-  title.x = Number(padding);
-  title.y = Number(currentY);
   summaryFrame.appendChild(title);
-  currentY = Number(currentY) + Number(title.height) + 16;
 
-  // Frame count subtitle
+  // Subtitle
   const subtitle = figma.createText();
   const subtitleFont = await loadFontSafely(await getBestAvailableFont("Regular"));
   subtitle.fontName = subtitleFont;
   subtitle.fontSize = 14;
   subtitle.characters = `${summaryData.frameCount} frames analyzed`;
   subtitle.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
-  subtitle.x = Number(padding);
-  subtitle.y = Number(currentY);
   summaryFrame.appendChild(subtitle);
-  currentY = Number(currentY) + Number(subtitle.height) + 32;
 
-  // Components section
+  // Components
   if (summaryData.totalComponents > 0) {
-    currentY = await addSummaryComponentsSection(summaryFrame, summaryData.components, currentY, padding);
+    await addSummaryComponentsSection(summaryFrame, summaryData.components);
   }
 
-  // Icons section
+  // Icons
   if (summaryData.totalIcons > 0) {
-    currentY = await addSummaryIconsSection(summaryFrame, summaryData.icons, currentY, padding);
+    await addSummaryIconsSection(summaryFrame, summaryData.icons);
   }
 
-  // Fonts section
+  // Fonts
   if (summaryData.totalFonts > 0) {
-    currentY = await addSummaryFontsSection(summaryFrame, summaryData.fonts, currentY, padding);
+    await addSummaryFontsSection(summaryFrame, summaryData.fonts);
   }
 
-  // Colors section
+  // Colors
   if (summaryData.totalColors > 0) {
-    currentY = await addSummaryColorsSection(summaryFrame, summaryData.colors, currentY, padding);
+    await addSummaryColorsSection(summaryFrame, summaryData.colors);
   }
 
-  // Summary stats
+  // Stats
   const statsText = figma.createText();
   const statsFont = await loadFontSafely({ family: "Inter", style: "Bold" });
   statsText.fontName = statsFont;
   statsText.fontSize = 16;
   statsText.characters = `Total: ${summaryData.totalComponents} Components • ${summaryData.totalFonts} Fonts • ${summaryData.totalColors} Colors`;
   statsText.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  statsText.x = Number(padding);
-  statsText.y = Number(currentY);
   summaryFrame.appendChild(statsText);
-  currentY = Number(currentY) + Number(statsText.height) + 16;
 
-  // Note about detailed analysis
   const noteText = figma.createText();
   const noteFont = await loadFontSafely({ family: "Inter", style: "Regular" });
   noteText.fontName = noteFont;
   noteText.fontSize = 12;
   noteText.characters = 'This summary updates automatically when you analyze new frames.\nDetailed breakdowns are available in individual frame analyses.';
   noteText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }];
-  noteText.x = Number(padding);
-  noteText.y = Number(currentY);
   summaryFrame.appendChild(noteText);
-  currentY = Number(currentY) + Number(noteText.height) + Number(padding);
-
-  // Calculate required width by checking all child elements
-  let maxWidth = 0;
-  for (const child of summaryFrame.children) {
-    const childRight = child.x + child.width;
-    maxWidth = Math.max(maxWidth, childRight);
-  }
-
-  // Resize summary frame with content-based width
-  const minWidth = 600;
-  const contentWidth = maxWidth + (padding * 2); // Add extra padding to the right
-  const finalWidth = Math.max(minWidth, contentWidth);
-  const finalHeight = currentY;
-  summaryFrame.resize(finalWidth, finalHeight);
 }
 
 // Add a summary section with items
-async function addSummarySection(frame, title, items, startY, padding) {
-  // Ensure all parameters are numbers
-  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
-  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+async function addSummarySection(frame, title, items) {
+  // Create container
+  const sectionContainer = figma.createFrame();
+  sectionContainer.name = `${title} Section`;
+  sectionContainer.layoutMode = 'VERTICAL';
+  sectionContainer.primaryAxisSizingMode = 'AUTO';
+  sectionContainer.counterAxisSizingMode = 'AUTO';
+  sectionContainer.itemSpacing = 6;
+  sectionContainer.fills = [];
 
   // Section title
   const sectionTitle = figma.createText();
@@ -1694,11 +1665,7 @@ async function addSummarySection(frame, title, items, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = title;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = safePadding;
-  sectionTitle.y = safeStartY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = safeStartY + sectionTitle.height + 12;
+  sectionContainer.appendChild(sectionTitle);
 
   // List items (max 10 to keep summary concise)
   const displayItems = items.slice(0, 10);
@@ -1709,10 +1676,7 @@ async function addSummarySection(frame, title, items, startY, padding) {
     itemText.fontSize = 12;
     itemText.characters = `• ${item}`;
     itemText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
-    itemText.x = safePadding + 12;
-    itemText.y = currentY;
-    frame.appendChild(itemText);
-    currentY = currentY + itemText.height + 4;
+    sectionContainer.appendChild(itemText);
   }
 
   // Show "and X more" if there are more items
@@ -1723,19 +1687,23 @@ async function addSummarySection(frame, title, items, startY, padding) {
     moreText.fontSize = 12;
     moreText.characters = `• and ${items.length - 10} more...`;
     moreText.fills = [{ type: 'SOLID', color: { r: 0.6, g: 0.6, b: 0.6 } }];
-    moreText.x = safePadding + 12;
-    moreText.y = currentY;
-    frame.appendChild(moreText);
-    currentY = currentY + moreText.height + 4;
+    sectionContainer.appendChild(moreText);
   }
 
-  return currentY + 20;
+  frame.appendChild(sectionContainer);
+  return;
 }
 
 // Add summary components section
-async function addSummaryComponentsSection(frame, components, startY, padding) {
-  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
-  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+async function addSummaryComponentsSection(frame, components) {
+  // Container
+  const container = figma.createFrame();
+  container.name = `Components Used (${components.length})`;
+  container.layoutMode = 'VERTICAL';
+  container.primaryAxisSizingMode = 'AUTO';
+  container.counterAxisSizingMode = 'AUTO';
+  container.itemSpacing = 6;
+  container.fills = [];
 
   // Section title
   const sectionTitle = figma.createText();
@@ -1744,11 +1712,7 @@ async function addSummaryComponentsSection(frame, components, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = `Components Used (${components.length})`;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = safePadding;
-  sectionTitle.y = safeStartY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = safeStartY + sectionTitle.height + 12;
+  container.appendChild(sectionTitle);
 
   // List components
   for (const comp of components) {
@@ -1758,19 +1722,23 @@ async function addSummaryComponentsSection(frame, components, startY, padding) {
     compText.fontSize = 12;
     compText.characters = `• ${comp.masterName}${comp.isVariant ? ` (${comp.variantName})` : ''}`;
     compText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
-    compText.x = safePadding + 12;
-    compText.y = currentY;
-    frame.appendChild(compText);
-    currentY = currentY + compText.height + 4;
+    container.appendChild(compText);
   }
 
-  return currentY + 20;
+  frame.appendChild(container);
+  return;
 }
 
 // Add summary icons section
-async function addSummaryIconsSection(frame, icons, startY, padding) {
-  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
-  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+async function addSummaryIconsSection(frame, icons) {
+  // Container
+  const container = figma.createFrame();
+  container.name = `Icons Used (${icons.length})`;
+  container.layoutMode = 'VERTICAL';
+  container.primaryAxisSizingMode = 'AUTO';
+  container.counterAxisSizingMode = 'AUTO';
+  container.itemSpacing = 6;
+  container.fills = [];
 
   // Section title
   const sectionTitle = figma.createText();
@@ -1779,11 +1747,7 @@ async function addSummaryIconsSection(frame, icons, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = `Icons Used (${icons.length})`;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = safePadding;
-  sectionTitle.y = safeStartY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = safeStartY + sectionTitle.height + 12;
+  container.appendChild(sectionTitle);
 
   // List icons
   for (const icon of icons) {
@@ -1794,19 +1758,23 @@ async function addSummaryIconsSection(frame, icons, startY, padding) {
     const displayName = icon.isVariant ? `${icon.masterName} (${icon.variantName})` : icon.masterName;
     iconText.characters = `• ${displayName}`;
     iconText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
-    iconText.x = safePadding + 12;
-    iconText.y = currentY;
-    frame.appendChild(iconText);
-    currentY = currentY + iconText.height + 4;
+    container.appendChild(iconText);
   }
 
-  return currentY + 20;
+  frame.appendChild(container);
+  return;
 }
 
 // Add summary fonts section
-async function addSummaryFontsSection(frame, fonts, startY, padding) {
-  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
-  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+async function addSummaryFontsSection(frame, fonts) {
+  // Container
+  const container = figma.createFrame();
+  container.name = `Fonts & Text Styles (${fonts.length})`;
+  container.layoutMode = 'VERTICAL';
+  container.primaryAxisSizingMode = 'AUTO';
+  container.counterAxisSizingMode = 'AUTO';
+  container.itemSpacing = 6;
+  container.fills = [];
 
   // Section title
   const sectionTitle = figma.createText();
@@ -1815,11 +1783,7 @@ async function addSummaryFontsSection(frame, fonts, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = `Fonts & Text Styles (${fonts.length})`;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = safePadding;
-  sectionTitle.y = safeStartY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = safeStartY + sectionTitle.height + 12;
+  container.appendChild(sectionTitle);
 
   // Separate fonts with styles from fonts without styles
   const fontsWithStyles = [];
@@ -1851,10 +1815,7 @@ async function addSummaryFontsSection(frame, fonts, startY, padding) {
 
     fontText.characters = `• ${displayString}`;
     fontText.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }]; // Black
-    fontText.x = safePadding + 12;
-    fontText.y = currentY;
-    frame.appendChild(fontText);
-    currentY = currentY + fontText.height + 4;
+    container.appendChild(fontText);
   }
 
   // Display fonts without styles at the end (red text)
@@ -1874,19 +1835,23 @@ async function addSummaryFontsSection(frame, fonts, startY, padding) {
 
     fontText.characters = `• ${displayString}`;
     fontText.fills = [{ type: 'SOLID', color: { r: 0.8, g: 0.2, b: 0.2 } }]; // Red
-    fontText.x = safePadding + 12;
-    fontText.y = currentY;
-    frame.appendChild(fontText);
-    currentY = currentY + fontText.height + 4;
+    container.appendChild(fontText);
   }
 
-  return currentY + 20;
+  frame.appendChild(container);
+  return;
 }
 
 // Add summary colors section
-async function addSummaryColorsSection(frame, colors, startY, padding) {
-  const safeStartY = Array.isArray(startY) ? startY[0] : Number(startY);
-  const safePadding = Array.isArray(padding) ? padding[0] : Number(padding);
+async function addSummaryColorsSection(frame, colors) {
+  // Container
+  const container = figma.createFrame();
+  container.name = `Colors & Styles (${colors.length})`;
+  container.layoutMode = 'VERTICAL';
+  container.primaryAxisSizingMode = 'AUTO';
+  container.counterAxisSizingMode = 'AUTO';
+  container.itemSpacing = 6;
+  container.fills = [];
 
   // Section title
   const sectionTitle = figma.createText();
@@ -1895,11 +1860,7 @@ async function addSummaryColorsSection(frame, colors, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = `Colors & Styles (${colors.length})`;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = safePadding;
-  sectionTitle.y = safeStartY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = safeStartY + sectionTitle.height + 12;
+  container.appendChild(sectionTitle);
 
   // List colors with swatches
   for (const color of colors) {
@@ -1907,13 +1868,17 @@ async function addSummaryColorsSection(frame, colors, startY, padding) {
     const displayText = color.displayHex || colorHex; // Use displayHex if available (includes opacity)
     const rgb = hexToRgb(colorHex);
 
+    // Row
+    const row = figma.createFrame();
+    row.layoutMode = 'HORIZONTAL';
+    row.primaryAxisSizingMode = 'AUTO';
+    row.counterAxisSizingMode = 'AUTO';
+    row.itemSpacing = 8;
+    row.fills = [];
+
     // Color swatch
     const swatch = figma.createRectangle();
     swatch.resize(16, 16);
-    swatch.x = safePadding + 12;
-    swatch.y = currentY + 2;
-
-    // Apply opacity to swatch if available
     const swatchFill = { type: 'SOLID', color: rgb };
     if (color.opacity !== undefined && color.opacity < 1) {
       swatchFill.opacity = color.opacity;
@@ -1921,7 +1886,6 @@ async function addSummaryColorsSection(frame, colors, startY, padding) {
     swatch.fills = [swatchFill];
     swatch.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
     swatch.strokeWeight = 1;
-    frame.appendChild(swatch);
 
     // Color text with hex and RGB565
     const colorText = figma.createText();
@@ -1932,17 +1896,27 @@ async function addSummaryColorsSection(frame, colors, startY, padding) {
     const rgb565 = color.rgb565 || hexToRgb565(colorHex);
     colorText.characters = `${displayText} | ${rgb565}${styleName}`;
     colorText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
-    colorText.x = safePadding + 36;
-    colorText.y = currentY;
-    frame.appendChild(colorText);
-    currentY = currentY + Math.max(colorText.height, 20) + 4;
+
+    row.appendChild(swatch);
+    row.appendChild(colorText);
+    container.appendChild(row);
   }
 
-  return currentY + 20;
+  frame.appendChild(container);
+  return;
 }
 
 // Add a component section with instance counts
-async function addComponentSection(frame, title, components, startY, padding) {
+async function addComponentSection(frame, title, components) {
+  // Create a container frame for the component section
+  const componentContainer = figma.createFrame();
+  componentContainer.name = `${title} Section`;
+  componentContainer.layoutMode = 'VERTICAL';
+  componentContainer.primaryAxisSizingMode = 'AUTO';
+  componentContainer.counterAxisSizingMode = 'AUTO';
+  componentContainer.itemSpacing = 8;
+  componentContainer.fills = []; // Transparent background
+
   // Section title
   const sectionTitle = figma.createText();
   const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
@@ -1950,11 +1924,7 @@ async function addComponentSection(frame, title, components, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = title;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = padding;
-  sectionTitle.y = startY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = startY + sectionTitle.height + 12;
+  componentContainer.appendChild(sectionTitle);
 
   // Group components by master component
   const groupedComponents = new Map();
@@ -1976,10 +1946,7 @@ async function addComponentSection(frame, title, components, startY, padding) {
     masterText.fontSize = 12;
     masterText.characters = `• ${masterName}`;
     masterText.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-    masterText.x = padding + 12;
-    masterText.y = currentY;
-    frame.appendChild(masterText);
-    currentY += masterText.height + 4;
+    componentContainer.appendChild(masterText);
 
     // List variants under the master component
     for (const variant of variants) {
@@ -2001,21 +1968,26 @@ async function addComponentSection(frame, title, components, startY, padding) {
 
       variantText.characters = displayText;
       variantText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
-      variantText.x = padding + 24;
-      variantText.y = currentY;
-      frame.appendChild(variantText);
-      currentY += variantText.height + 3;
+      componentContainer.appendChild(variantText);
     }
 
-    // Add spacing between master components
-    currentY += 6;
   }
 
-  return currentY + 20;
+  // Add the component container to the main frame
+  frame.appendChild(componentContainer);
 }
 
 // Add a text section to the analysis frame
-async function addSection(frame, title, items, startY, padding) {
+async function addSection(frame, title, items) {
+  // Create a container frame for the section
+  const sectionContainer = figma.createFrame();
+  sectionContainer.name = `${title} Section`;
+  sectionContainer.layoutMode = 'VERTICAL';
+  sectionContainer.primaryAxisSizingMode = 'AUTO';
+  sectionContainer.counterAxisSizingMode = 'AUTO';
+  sectionContainer.itemSpacing = 6;
+  sectionContainer.fills = []; // Transparent background
+
   // Section title
   const sectionTitle = figma.createText();
   const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
@@ -2023,11 +1995,7 @@ async function addSection(frame, title, items, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = title;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = padding;
-  sectionTitle.y = startY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = startY + sectionTitle.height + 12;
+  sectionContainer.appendChild(sectionTitle);
 
   // Section items
   for (const item of items) {
@@ -2037,17 +2005,23 @@ async function addSection(frame, title, items, startY, padding) {
     itemText.fontSize = 12;
     itemText.characters = `• ${item}`;
     itemText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
-    itemText.x = padding + 12;
-    itemText.y = currentY;
-    frame.appendChild(itemText);
-    currentY += itemText.height + 6;
+    sectionContainer.appendChild(itemText);
   }
 
-  return currentY + 20;
+  // Add the section container to the main frame
+  frame.appendChild(sectionContainer);
 }
 
 // Add a combined font section with font variations and text styles
-async function addCombinedFontSection(frame, title, fonts, textStyles, startY, padding) {
+async function addCombinedFontSection(frame, title, fonts, textStyles) {
+  // Create a container frame for the font section
+  const fontContainer = figma.createFrame();
+  fontContainer.name = `${title} Section`;
+  fontContainer.layoutMode = 'VERTICAL';
+  fontContainer.primaryAxisSizingMode = 'AUTO';
+  fontContainer.counterAxisSizingMode = 'AUTO';
+  fontContainer.itemSpacing = 8;
+  fontContainer.fills = []; // Transparent background
   // Section title
   const sectionTitle = figma.createText();
   const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
@@ -2055,11 +2029,7 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
   sectionTitle.fontSize = 16;
   sectionTitle.characters = title;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = padding;
-  sectionTitle.y = startY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = startY + sectionTitle.height + 12;
+  fontContainer.appendChild(sectionTitle);
 
   // Create a combined list of fonts with their associated styles
   const allFonts = new Map();
@@ -2137,10 +2107,7 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
       const displayText = `${cleanFontString} (${fontInfo.styleName})`;
       fontText.characters = `• ${displayText}`;
       fontText.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }]; // Black text
-      fontText.x = padding + 12;
-      fontText.y = currentY;
-      frame.appendChild(fontText);
-      currentY += fontText.height + 6;
+      fontContainer.appendChild(fontText);
     }
 
     // Display fonts without text styles (red text)
@@ -2154,18 +2121,24 @@ async function addCombinedFontSection(frame, title, fonts, textStyles, startY, p
       const cleanFontString = fontInfo.fontString.replace(/px.*$/, 'px'); // Remove any extra text after px
       fontText.characters = `• ${cleanFontString}`;
       fontText.fills = [{ type: 'SOLID', color: { r: 0.8, g: 0.2, b: 0.2 } }]; // Red text for no style
-      fontText.x = padding + 12;
-      fontText.y = currentY;
-      frame.appendChild(fontText);
-      currentY += fontText.height + 6;
+      fontContainer.appendChild(fontText);
     }
   }
 
-  return currentY + 10;
+  // Add the font container to the main frame
+  frame.appendChild(fontContainer);
 }
 
 // Add a combined color section with color swatches and styles
-async function addCombinedColorSection(frame, title, colors, startY, padding) {
+async function addCombinedColorSection(frame, title, colors) {
+  // Create a container frame for the color section
+  const colorContainer = figma.createFrame();
+  colorContainer.name = `${title} Section`;
+  colorContainer.layoutMode = 'VERTICAL';
+  colorContainer.primaryAxisSizingMode = 'AUTO';
+  colorContainer.counterAxisSizingMode = 'AUTO';
+  colorContainer.itemSpacing = 8;
+  colorContainer.fills = []; // Transparent background
   // Section title
   const sectionTitle = figma.createText();
   const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
@@ -2173,11 +2146,7 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = title;
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = padding;
-  sectionTitle.y = startY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = startY + sectionTitle.height + 12;
+  colorContainer.appendChild(sectionTitle);
 
   // Display colors with swatches, hex values, and style names - colors with styles first, then colors without styles
   if (colors.length > 0) {
@@ -2207,11 +2176,17 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
     for (const colorInfo of colorsWithStyles) {
       const rgb = hexToRgb(colorInfo.hex);
 
+      // Row container for swatch + text
+      const row = figma.createFrame();
+      row.layoutMode = 'HORIZONTAL';
+      row.primaryAxisSizingMode = 'AUTO';
+      row.counterAxisSizingMode = 'AUTO';
+      row.itemSpacing = 8;
+      row.fills = [];
+
       // Color swatch with border
       const swatch = figma.createRectangle();
       swatch.resize(20, 20);
-      swatch.x = padding + 12;
-      swatch.y = currentY;
 
       // Apply opacity to swatch if available
       const swatchFill = { type: 'SOLID', color: rgb };
@@ -2222,7 +2197,6 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
       swatch.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
       swatch.strokeWeight = 1;
       swatch.cornerRadius = 3;
-      frame.appendChild(swatch);
 
       // Color text with hex, RGB565, and style name
       const colorText = figma.createText();
@@ -2234,22 +2208,27 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
       const displayText = `${colorInfo.displayHex} | ${rgb565} - ${colorInfo.styleName}`;
       colorText.characters = displayText;
       colorText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
-      colorText.x = padding + 40;
-      colorText.y = currentY + 2;
-      frame.appendChild(colorText);
 
-      currentY += 28;
+      row.appendChild(swatch);
+      row.appendChild(colorText);
+      colorContainer.appendChild(row);
     }
 
     // Display colors without color styles at the end
     for (const colorInfo of colorsWithoutStyles) {
       const rgb = hexToRgb(colorInfo.hex);
 
+      // Row container for swatch + text
+      const row = figma.createFrame();
+      row.layoutMode = 'HORIZONTAL';
+      row.primaryAxisSizingMode = 'AUTO';
+      row.counterAxisSizingMode = 'AUTO';
+      row.itemSpacing = 8;
+      row.fills = [];
+
       // Color swatch with border
       const swatch = figma.createRectangle();
       swatch.resize(20, 20);
-      swatch.x = padding + 12;
-      swatch.y = currentY;
 
       // Apply opacity to swatch if available
       const swatchFill = { type: 'SOLID', color: rgb };
@@ -2260,7 +2239,6 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
       swatch.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
       swatch.strokeWeight = 1;
       swatch.cornerRadius = 3;
-      frame.appendChild(swatch);
 
       // Color text with hex and RGB565 values (including opacity)
       const colorText = figma.createText();
@@ -2271,15 +2249,16 @@ async function addCombinedColorSection(frame, title, colors, startY, padding) {
       const rgb565 = colorInfo.rgb565 || hexToRgb565(colorInfo.hex);
       colorText.characters = `${colorInfo.displayHex} | ${rgb565}`;
       colorText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }]; // Slightly lighter color
-      colorText.x = padding + 40;
-      colorText.y = currentY + 2;
-      frame.appendChild(colorText);
 
-      currentY += 28;
+      row.appendChild(swatch);
+      row.appendChild(colorText);
+      colorContainer.appendChild(row);
     }
   }
 
-  return currentY + 10;
+  // Add color container to main frame
+  frame.appendChild(colorContainer);
+  return;
 }
 
 // Keep the original color section function for backward compatibility
@@ -2331,7 +2310,16 @@ async function addColorSection(frame, title, colors, startY, padding) {
 }
 
 // Add a summary section
-async function addSummarySection(frame, analysisData, startY, padding) {
+async function addSummarySection(frame, analysisData) {
+  // Create a container frame for the summary section
+  const summaryContainer = figma.createFrame();
+  summaryContainer.name = "Summary Section";
+  summaryContainer.layoutMode = 'VERTICAL';
+  summaryContainer.primaryAxisSizingMode = 'AUTO';
+  summaryContainer.counterAxisSizingMode = 'AUTO';
+  summaryContainer.itemSpacing = 8;
+  summaryContainer.fills = []; // Transparent background
+
   // Section title
   const sectionTitle = figma.createText();
   const titleFont = await loadFontSafely({ family: "Inter", style: "Bold" });
@@ -2339,11 +2327,7 @@ async function addSummarySection(frame, analysisData, startY, padding) {
   sectionTitle.fontSize = 16;
   sectionTitle.characters = "Summary";
   sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
-  sectionTitle.x = padding;
-  sectionTitle.y = startY;
-  frame.appendChild(sectionTitle);
-
-  let currentY = startY + sectionTitle.height + 12;
+  summaryContainer.appendChild(sectionTitle);
 
   // Summary items
   const summaryItems = [
@@ -2363,13 +2347,11 @@ async function addSummarySection(frame, analysisData, startY, padding) {
     itemText.fontSize = 12;
     itemText.characters = `• ${item}`;
     itemText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
-    itemText.x = padding + 12;
-    itemText.y = currentY;
-    frame.appendChild(itemText);
-    currentY += itemText.height + 6;
+    summaryContainer.appendChild(itemText);
   }
 
-  return currentY + 20;
+  // Add the summary container to the main frame
+  frame.appendChild(summaryContainer);
 }
 
 // Convert hex to RGB
