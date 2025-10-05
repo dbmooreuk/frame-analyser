@@ -289,8 +289,11 @@ async function analyzeSelectedFrame() {
         details: `Processing ${selectedNode.name}`
       });
 
-      const analysisData = await analyzeFrame(selectedNode);
-      console.log('Analysis data:', analysisData);
+      let analysisData = await analyzeFrame(selectedNode);
+      console.log('Analysis data (raw):', analysisData);
+
+      // Normalize component/icon classification
+      analysisData = normalizeComponentIconClassification(analysisData);
 
       // Store analysis data for summary
       storeAnalysisData(selectedNode.name, analysisData);
@@ -511,17 +514,46 @@ async function analyzeFrame(frame) {
 
 // Helper function to determine if a component is an icon
 function isComponentAnIcon(mainComponent) {
-  const componentName = mainComponent.name;
-  const masterName = (mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET')
-    ? mainComponent.parent.name
-    : componentName;
+  try {
+    const compName = (mainComponent.name || '').trim();
+    const compNameLower = compName.toLowerCase();
+    const setName = (mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET') ? (mainComponent.parent.name || '') : '';
+    const setNameLower = setName.toLowerCase();
 
-  // Simple rule: Icons start with lowercase, Components start with uppercase
-  const componentStartsWithLowercase = /^[a-z]/.test(componentName);
-  const masterStartsWithLowercase = /^[a-z]/.test(masterName);
+    // Heuristic: treat as icon only when the naming clearly indicates it
+    const iconNameRegex = /(^|\b|[_\-\s])(ic|icon)([_\-\s]|\b|$)/i;
+    const looksLikeIconByName = iconNameRegex.test(compName) || iconNameRegex.test(setName);
 
-  // An icon is any component that starts with a lowercase letter
-  return componentStartsWithLowercase || masterStartsWithLowercase;
+    // Heuristic 2: variant properties sometimes include "Icon" keys or values
+    let looksLikeIconByVariant = false;
+    try {
+      const vp = mainComponent.variantProperties;
+      if (vp) {
+        for (const k in vp) {
+          if (/icon/i.test(k) || /icon/i.test(String(vp[k]))) {
+            looksLikeIconByVariant = true;
+            break;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Optional size hint: many icons are within 12–128 px on at least one edge
+    // Do NOT rely only on size to avoid false positives; use as a weak hint.
+    const w = Math.round(mainComponent.width || 0);
+    const h = Math.round(mainComponent.height || 0);
+    const looksIconBySize = (w > 0 && h > 0 && Math.max(w, h) <= 128);
+
+    // Final decision: require explicit icon naming or variant prop; size is only supportive
+    if (looksLikeIconByName || looksLikeIconByVariant) {
+      return true;
+    }
+
+    return false; // default to component unless clearly an icon
+  } catch (e) {
+    // If unsure, err on the side of component
+    return false;
+  }
 }
 
 // Track processed nodes to avoid duplicates
@@ -1505,6 +1537,45 @@ async function loadFontCached(fontName) {
 }
 
 // Store analysis data for summary
+
+// Ensure components/icons arrays reflect icon heuristic consistently
+function normalizeComponentIconClassification(analysisData) {
+  if (!analysisData) return analysisData;
+  const reclassComponents = [];
+  const reclassIcons = [];
+
+  const pushComp = (c) => { if (c) { c.isIcon = false; reclassComponents.push(c); } };
+  const pushIcon = (c) => { if (c) { c.isIcon = true; reclassIcons.push(c); } };
+
+  if (Array.isArray(analysisData.components)) {
+    for (const comp of analysisData.components) {
+      try {
+        // If any were mislabelled as component but name indicates icon, move to icons
+        const name = (comp.masterName || comp.fullName || comp.name || '').toLowerCase();
+        const setName = (comp.setName || '').toLowerCase();
+        const looksIcon = /(^|\b|[_\-\s])(ic|icon)([_\-\s]|\b|$)/i.test(name) || /icon/i.test(setName) || comp.isIcon === true;
+        if (looksIcon) pushIcon(comp); else pushComp(comp);
+      } catch (_) { pushComp(comp); }
+    }
+  }
+
+  if (Array.isArray(analysisData.icons)) {
+    for (const icon of analysisData.icons) {
+      try {
+        // If any were mislabelled as icon but naming doesn't indicate icon, move to components
+        const name = (icon.masterName || icon.fullName || icon.name || '').toLowerCase();
+        const setName = (icon.setName || '').toLowerCase();
+        const looksIcon = /(^|\b|[_\-\s])(ic|icon)([_\-\s]|\b|$)/i.test(name) || /icon/i.test(setName) || icon.isIcon === true;
+        if (looksIcon) pushIcon(icon); else pushComp(icon);
+      } catch (_) { pushIcon(icon); }
+    }
+  }
+
+  analysisData.components = reclassComponents;
+  analysisData.icons = reclassIcons;
+  return analysisData;
+}
+
 function storeAnalysisData(frameName, analysisData) {
   globalAnalysisData.set(frameName, analysisData);
   console.log(`Stored analysis data for: ${frameName}`);
@@ -1548,54 +1619,45 @@ async function collectSummaryData() {
 
   // Aggregate data from stored analysis results
   for (const [frameName, analysisData] of globalAnalysisData.entries()) {
-    // Removed verbose logging for better performance
+    const normalized = normalizeComponentIconClassification({
+      components: analysisData.components || [],
+      icons: analysisData.icons || []
+    });
 
     // Aggregate components (unique by master name + variant name)
-    if (analysisData.components) {
-      analysisData.components.forEach(comp => {
+    if (normalized.components) {
+      normalized.components.forEach(comp => {
         const key = comp.isVariant ? `${comp.masterName}:${comp.variantName}` : comp.masterName;
         if (!aggregatedComponents.has(key)) {
           aggregatedComponents.set(key, comp);
-          console.log(`  Added component: ${key}`);
         }
       });
     }
 
     // Aggregate icons (unique by master name + variant name)
-    if (analysisData.icons) {
-      analysisData.icons.forEach(icon => {
+    if (normalized.icons) {
+      normalized.icons.forEach(icon => {
         const key = icon.isVariant ? `${icon.masterName}:${icon.variantName}` : icon.masterName;
         if (!aggregatedIcons.has(key)) {
           aggregatedIcons.set(key, icon);
-          console.log(`  Added icon: ${key}`);
         }
       });
     }
 
-    // Aggregate fonts (unique by font key which includes size)
+    // Fonts
     if (analysisData.fonts) {
-      analysisData.fonts.forEach(font => {
-        const fontKey = font.fontKey || font.displayString || font.fontString || font;
-        if (!aggregatedFonts.has(fontKey)) {
-          aggregatedFonts.set(fontKey, font);
-          console.log(`  Added font: ${fontKey}`);
-        }
-      });
+      for (const f of analysisData.fonts) {
+        const key = f.displayString || f.fontString || `${f.fontFamily} ${f.fontStyle} ${f.fontSize}`;
+        if (!aggregatedFonts.has(key)) aggregatedFonts.set(key, f);
+      }
     }
 
-    // Aggregate colors (unique by hex value)
+    // Colors
     if (analysisData.colors) {
-      console.log(`  Processing ${analysisData.colors.length} colors from ${frameName}`);
-      analysisData.colors.forEach((color, index) => {
-        console.log(`    Color ${index + 1}:`, color);
-        const colorKey = color.hex || color;
-        if (!aggregatedColors.has(colorKey)) {
-          aggregatedColors.set(colorKey, color);
-          console.log(`  Added color: ${colorKey}`);
-        } else {
-          console.log(`  Color ${colorKey} already exists, skipping`);
-        }
-      });
+      for (const c of analysisData.colors) {
+        const hex = c.hex || c;
+        if (!aggregatedColors.has(hex)) aggregatedColors.set(hex, c);
+      }
     }
   }
 
@@ -1616,6 +1678,7 @@ async function collectSummaryData() {
 
   return result;
 }
+
 
 // Find the best position for the summary frame on the analysis page
 function findSummaryPosition(analysisPage) {
