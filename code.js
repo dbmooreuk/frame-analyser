@@ -520,9 +520,13 @@ function isComponentAnIcon(mainComponent) {
     const setName = (mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET') ? (mainComponent.parent.name || '') : '';
     const setNameLower = setName.toLowerCase();
 
-    // Heuristic: treat as icon only when the naming clearly indicates it
+    // Heuristic: treat as icon when naming clearly indicates it; include hard prefixes
     const iconNameRegex = /(^|\b|[_\-\s])(ic|icon)([_\-\s]|\b|$)/i;
     const looksLikeIconByName = iconNameRegex.test(compName) || iconNameRegex.test(setName);
+
+    // Hard overrides by prefixes: i- => icon, c- => component
+    const hardIcon = /^i-/.test(compNameLower) || /^i-/.test(setNameLower);
+    const hardComponent = /^c-/.test(compNameLower) || /^c-/.test(setNameLower);
 
     // Heuristic 2: variant properties sometimes include "Icon" keys or values
     let looksLikeIconByVariant = false;
@@ -544,7 +548,12 @@ function isComponentAnIcon(mainComponent) {
     const h = Math.round(mainComponent.height || 0);
     const looksIconBySize = (w > 0 && h > 0 && Math.max(w, h) <= 128);
 
-    // Final decision: require explicit icon naming or variant prop; size is only supportive
+    // Final decision order:
+    // 1) Hard overrides by prefixes
+    if (hardIcon) return true;
+    if (hardComponent) return false;
+
+    // 2) Explicit icon naming or variant prop; size is only supportive (not decisive here)
     if (looksLikeIconByName || looksLikeIconByVariant) {
       return true;
     }
@@ -1547,14 +1556,36 @@ function normalizeComponentIconClassification(analysisData) {
   const pushComp = (c) => { if (c) { c.isIcon = false; reclassComponents.push(c); } };
   const pushIcon = (c) => { if (c) { c.isIcon = true; reclassIcons.push(c); } };
 
+  // Helper: check hard prefix across component, variant, full and set names and their path segments
+  const hasHardPrefix = (entry, type) => {
+    const candidates = [entry.masterName, entry.variantName, entry.fullName, entry.name, entry.setName]
+      .filter(Boolean).map(s => String(s).toLowerCase());
+    for (const s of candidates) {
+      const segments = s.split('/').map(seg => seg.trim());
+      for (const seg of segments) {
+        if (type === 'icon' && /^i-/.test(seg)) return true;
+        if (type === 'component' && /^c-/.test(seg)) return true;
+      }
+    }
+    return false;
+  };
+
+  const looksIconLoose = (entry) => {
+    const candidates = [entry.masterName, entry.variantName, entry.fullName, entry.name, entry.setName]
+      .filter(Boolean).map(s => String(s).toLowerCase());
+    const joined = candidates.join(' ');
+    return /(^|\b|[_\-\s])(ic|icon)([_\-\s]|\b|$)/i.test(joined) || /\bicon\b/i.test(joined) || entry.isIcon === true;
+  };
+
   if (Array.isArray(analysisData.components)) {
     for (const comp of analysisData.components) {
       try {
-        // If any were mislabelled as component but name indicates icon, move to icons
-        const name = (comp.masterName || comp.fullName || comp.name || '').toLowerCase();
-        const setName = (comp.setName || '').toLowerCase();
-        const looksIcon = /(^|\b|[_\-\s])(ic|icon)([_\-\s]|\b|$)/i.test(name) || /icon/i.test(setName) || comp.isIcon === true;
-        if (looksIcon) pushIcon(comp); else pushComp(comp);
+        const hardIcon = hasHardPrefix(comp, 'icon');
+        const hardComponent = hasHardPrefix(comp, 'component');
+        if (hardIcon) { pushIcon(comp); continue; }
+        if (hardComponent) { pushComp(comp); continue; }
+        const isIcon = looksIconLoose(comp);
+        if (isIcon) pushIcon(comp); else pushComp(comp);
       } catch (_) { pushComp(comp); }
     }
   }
@@ -1562,11 +1593,12 @@ function normalizeComponentIconClassification(analysisData) {
   if (Array.isArray(analysisData.icons)) {
     for (const icon of analysisData.icons) {
       try {
-        // If any were mislabelled as icon but naming doesn't indicate icon, move to components
-        const name = (icon.masterName || icon.fullName || icon.name || '').toLowerCase();
-        const setName = (icon.setName || '').toLowerCase();
-        const looksIcon = /(^|\b|[_\-\s])(ic|icon)([_\-\s]|\b|$)/i.test(name) || /icon/i.test(setName) || icon.isIcon === true;
-        if (looksIcon) pushIcon(icon); else pushComp(icon);
+        const hardIcon = hasHardPrefix(icon, 'icon');
+        const hardComponent = hasHardPrefix(icon, 'component');
+        if (hardIcon) { pushIcon(icon); continue; }
+        if (hardComponent) { pushComp(icon); continue; }
+        const isIcon = looksIconLoose(icon);
+        if (isIcon) pushIcon(icon); else pushComp(icon);
       } catch (_) { pushIcon(icon); }
     }
   }
@@ -1575,6 +1607,7 @@ function normalizeComponentIconClassification(analysisData) {
   analysisData.icons = reclassIcons;
   return analysisData;
 }
+
 
 function storeAnalysisData(frameName, analysisData) {
   globalAnalysisData.set(frameName, analysisData);
